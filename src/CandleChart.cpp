@@ -22,6 +22,7 @@ CandleChart::CandleChart(QWidget* parent)
     setRenderHint(QPainter::Antialiasing);
     chart()->setAnimationOptions(QChart::NoAnimation);
     setMouseTracking(true);
+    viewport()->setMouseTracking(true);
 
     m_crosshairLine = new QGraphicsLineItem();
     m_crosshairLine->setPen(QPen(QColor(200, 200, 200), 1, Qt::DashLine));
@@ -187,7 +188,7 @@ void CandleChart::paintCrosshairAt(double sceneX, qint64 timestampMs)
     const QString text = QString(
         "%1\n"
         "O: %2   H: %3\n"
-        "L: %4   C: %5\n"
+        "C: %5   L: %4\n"
         "V: %6"
     ).arg(bar.timestamp.toString("yyyy-MM-dd"))
      .arg(bar.open,  0, 'f', 2)

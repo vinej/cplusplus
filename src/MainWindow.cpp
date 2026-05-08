@@ -3,6 +3,7 @@
 #include "CandleChart.h"
 #include "Indicators.h"
 #include "RsiChart.h"
+#include "VolumeChart.h"
 #include "YahooFinanceClient.h"
 
 #include <QComboBox>
@@ -22,6 +23,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_client(new YahooFinanceClient(this))
     , m_chart(new CandleChart(this))
+    , m_volumeChart(new VolumeChart(this))
     , m_rsiChart(new RsiChart(this))
     , m_scrollArea(new QScrollArea(this))
     , m_symbolEdit(new QLineEdit("AAPL", this))
@@ -52,6 +54,7 @@ MainWindow::MainWindow(QWidget* parent)
     topRow->addWidget(m_fetchButton);
     topRow->addStretch(1);
 
+    m_volumeChart->hide();
     m_rsiChart->hide();
 
     auto* chartsContainer = new QWidget();
@@ -59,6 +62,7 @@ MainWindow::MainWindow(QWidget* parent)
     chartsLayout->setContentsMargins(0, 0, 0, 0);
     chartsLayout->setSpacing(0);
     chartsLayout->addWidget(m_chart);
+    chartsLayout->addWidget(m_volumeChart);
     chartsLayout->addWidget(m_rsiChart);
 
     m_scrollArea->setWidget(chartsContainer);
@@ -90,11 +94,21 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_client, &YahooFinanceClient::failed,
             this,     &MainWindow::onDataFailed);
 
-    // Sync crosshair between the two chart panels
-    connect(m_chart,    &CandleChart::crosshairMoved, m_rsiChart, &RsiChart::updateCrosshair);
-    connect(m_chart,    &CandleChart::crosshairLeft,  m_rsiChart, &RsiChart::hideCrosshair);
-    connect(m_rsiChart, &RsiChart::crosshairMoved,    m_chart,    &CandleChart::updateCrosshair);
-    connect(m_rsiChart, &RsiChart::crosshairLeft,     m_chart,    &CandleChart::hideCrosshair);
+    // Sync crosshair across all three panels (no signal loops: updateCrosshair never re-emits)
+    connect(m_chart,       &CandleChart::crosshairMoved,  m_volumeChart, &VolumeChart::updateCrosshair);
+    connect(m_chart,       &CandleChart::crosshairLeft,   m_volumeChart, &VolumeChart::hideCrosshair);
+    connect(m_chart,       &CandleChart::crosshairMoved,  m_rsiChart,    &RsiChart::updateCrosshair);
+    connect(m_chart,       &CandleChart::crosshairLeft,   m_rsiChart,    &RsiChart::hideCrosshair);
+
+    connect(m_volumeChart, &VolumeChart::crosshairMoved,  m_chart,       &CandleChart::updateCrosshair);
+    connect(m_volumeChart, &VolumeChart::crosshairLeft,   m_chart,       &CandleChart::hideCrosshair);
+    connect(m_volumeChart, &VolumeChart::crosshairMoved,  m_rsiChart,    &RsiChart::updateCrosshair);
+    connect(m_volumeChart, &VolumeChart::crosshairLeft,   m_rsiChart,    &RsiChart::hideCrosshair);
+
+    connect(m_rsiChart,    &RsiChart::crosshairMoved,     m_chart,       &CandleChart::updateCrosshair);
+    connect(m_rsiChart,    &RsiChart::crosshairLeft,      m_chart,       &CandleChart::hideCrosshair);
+    connect(m_rsiChart,    &RsiChart::crosshairMoved,     m_volumeChart, &VolumeChart::updateCrosshair);
+    connect(m_rsiChart,    &RsiChart::crosshairLeft,      m_volumeChart, &VolumeChart::hideCrosshair);
 }
 
 bool MainWindow::eventFilter(QObject* obj, QEvent* e)
@@ -121,6 +135,8 @@ void MainWindow::onDataReady(const QString& symbol, const CandleSeries& candles)
     m_fetchButton->setEnabled(true);
     m_lastCandles = candles;
     m_chart->setData(symbol, candles);
+    m_volumeChart->setData(candles);
+    m_volumeChart->show();
     applyIndicator();
     statusBar()->showMessage(
         QString("%1: %2 bars").arg(symbol).arg(candles.size()));

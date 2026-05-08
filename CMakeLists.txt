@@ -29,6 +29,8 @@ qt_add_executable(qt_finance
     src/CandleChart.h
     src/RsiChart.cpp
     src/RsiChart.h
+    src/VolumeChart.cpp
+    src/VolumeChart.h
     src/Indicators.cpp
     src/Indicators.h
     src/Candle.h

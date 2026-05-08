@@ -1,22 +1,28 @@
-#include "RsiChart.h"
+#include "VolumeChart.h"
 
+#include <QCandlestickSeries>
+#include <QCandlestickSet>
 #include <QChart>
 #include <QDateTimeAxis>
 #include <QGraphicsLineItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsTextItem>
-#include <QLineSeries>
+#include <QLocale>
 #include <QMouseEvent>
 #include <QValueAxis>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
-RsiChart::RsiChart(QWidget* parent)
+static constexpr double kVolScale = 1e6; // display volumes in millions
+
+VolumeChart::VolumeChart(QWidget* parent)
     : QChartView(parent)
 {
     setRenderHint(QPainter::Antialiasing);
     chart()->setAnimationOptions(QChart::NoAnimation);
-    chart()->setTitle("RSI");
+    chart()->setTitle("Volume");
     chart()->legend()->hide();
     setFixedHeight(240);
     setMouseTracking(true);
@@ -43,10 +49,9 @@ RsiChart::RsiChart(QWidget* parent)
     scene()->addItem(m_infoText);
 }
 
-void RsiChart::clear()
+void VolumeChart::clear()
 {
-    m_timestamps.clear();
-    m_values.clear();
+    m_lastCandles.clear();
     hideCrosshair();
 
     QChart* c = chart();
@@ -55,53 +60,54 @@ void RsiChart::clear()
     for (QAbstractAxis* a : axes) c->removeAxis(a);
 }
 
-void RsiChart::setData(const QVector<QDateTime>& timestamps, const QVector<double>& values)
+void VolumeChart::setData(const CandleSeries& candles)
 {
     clear();
-    m_timestamps = timestamps;
-    m_values     = values;
+    m_lastCandles = candles;
+    if (candles.isEmpty()) return;
 
-    if (timestamps.isEmpty() || values.isEmpty()) return;
+    // Two series so each can have its own solid color (bull=green, bear=red).
+    auto makeSeries = [](QColor color) {
+        auto* s = new QCandlestickSeries();
+        s->setBodyWidth(0.8);
+        s->setIncreasingColor(color);
+        s->setDecreasingColor(color);
+        QPen p(color);
+        p.setWidthF(0.5);
+        s->setPen(p);
+        return s;
+    };
 
-    auto* rsiLine = new QLineSeries();
-    rsiLine->setColor(QColor(100, 150, 255));
+    auto* bullSeries = makeSeries(QColor(0, 160, 80, 200));
+    auto* bearSeries = makeSeries(QColor(200, 50, 50, 200));
 
-    for (int i = 0; i < values.size(); ++i) {
-        if (std::isnan(values[i])) continue;
-        rsiLine->append(timestamps[i].toMSecsSinceEpoch(), values[i]);
+    double maxVol = 0;
+    for (const Candle& bar : candles) {
+        const double vol = bar.volume / kVolScale;
+        maxVol = std::max(maxVol, vol);
+        const qint64 ts = bar.timestamp.toMSecsSinceEpoch();
+
+        // Body from 0→vol (bull) or vol→0 (bear) so Qt Charts picks the right color.
+        if (bar.close >= bar.open)
+            bullSeries->append(new QCandlestickSet(0, vol, 0, vol, ts));
+        else
+            bearSeries->append(new QCandlestickSet(vol, vol, 0, 0, ts));
     }
 
-    const qint64 t0 = timestamps.first().toMSecsSinceEpoch();
-    const qint64 t1 = timestamps.last().toMSecsSinceEpoch();
-
-    auto* obLine = new QLineSeries();
-    QPen obPen(QColor(200, 50, 50));
-    obPen.setStyle(Qt::DashLine);
-    obLine->setPen(obPen);
-    obLine->append(t0, 70);
-    obLine->append(t1, 70);
-
-    auto* osLine = new QLineSeries();
-    QPen osPen(QColor(0, 160, 80));
-    osPen.setStyle(Qt::DashLine);
-    osLine->setPen(osPen);
-    osLine->append(t0, 30);
-    osLine->append(t1, 30);
-
     QChart* c = chart();
-    c->addSeries(rsiLine);
-    c->addSeries(obLine);
-    c->addSeries(osLine);
+    c->addSeries(bullSeries);
+    c->addSeries(bearSeries);
 
     auto* xAxis = new QDateTimeAxis();
     xAxis->setFormat("MMM yy");
-    xAxis->setRange(timestamps.first(), timestamps.last());
+    xAxis->setRange(candles.first().timestamp, candles.last().timestamp);
     c->addAxis(xAxis, Qt::AlignBottom);
 
     auto* yAxis = new QValueAxis();
-    yAxis->setRange(0, 100);
-    yAxis->setTickCount(5);
-    yAxis->setTitleText("RSI");
+    yAxis->setRange(0, maxVol * 1.15);
+    yAxis->setTickCount(3);
+    yAxis->setTitleText("Vol (M)");
+    yAxis->setLabelFormat("%.0f");
     c->addAxis(yAxis, Qt::AlignLeft);
 
     for (QAbstractSeries* s : c->series()) {
@@ -112,10 +118,10 @@ void RsiChart::setData(const QVector<QDateTime>& timestamps, const QVector<doubl
 
 // ── mouse events ─────────────────────────────────────────────────────────────
 
-void RsiChart::mouseMoveEvent(QMouseEvent* event)
+void VolumeChart::mouseMoveEvent(QMouseEvent* event)
 {
     QChartView::mouseMoveEvent(event);
-    if (m_timestamps.isEmpty()) return;
+    if (m_lastCandles.isEmpty()) return;
 
     const QPointF sp = mapToScene(event->pos());
     const QRectF  pa = chart()->plotArea();
@@ -127,7 +133,7 @@ void RsiChart::mouseMoveEvent(QMouseEvent* event)
     emit crosshairMoved(tsMs);
 }
 
-void RsiChart::leaveEvent(QEvent* event)
+void VolumeChart::leaveEvent(QEvent* event)
 {
     QChartView::leaveEvent(event);
     hideCrosshair();
@@ -136,16 +142,16 @@ void RsiChart::leaveEvent(QEvent* event)
 
 // ── public slots ──────────────────────────────────────────────────────────────
 
-void RsiChart::updateCrosshair(qint64 timestampMs)
+void VolumeChart::updateCrosshair(qint64 timestampMs)
 {
-    if (m_timestamps.isEmpty()) return;
+    if (m_lastCandles.isEmpty()) return;
     const double sx = chart()->mapToPosition(QPointF(timestampMs, 0)).x();
     const QRectF  pa = chart()->plotArea();
     if (sx >= pa.left() && sx <= pa.right())
         paintCrosshairAt(sx, timestampMs);
 }
 
-void RsiChart::hideCrosshair()
+void VolumeChart::hideCrosshair()
 {
     m_crosshairLine->setVisible(false);
     m_infoBg->setVisible(false);
@@ -154,17 +160,19 @@ void RsiChart::hideCrosshair()
 
 // ── private helpers ───────────────────────────────────────────────────────────
 
-void RsiChart::paintCrosshairAt(double sceneX, qint64 timestampMs)
+void VolumeChart::paintCrosshairAt(double sceneX, qint64 timestampMs)
 {
     const QRectF pa = chart()->plotArea();
 
     m_crosshairLine->setLine(sceneX, pa.top(), sceneX, pa.bottom());
     m_crosshairLine->setVisible(true);
 
-    const int idx = nearestSample(timestampMs);
-    if (idx < 0 || std::isnan(m_values[idx])) return;
+    const int idx = nearestCandle(timestampMs);
+    if (idx < 0) return;
 
-    m_infoText->setPlainText(QString("RSI: %1").arg(m_values[idx], 0, 'f', 1));
+    const Candle& bar = m_lastCandles[idx];
+    m_infoText->setPlainText(
+        QString("V: %1").arg(QLocale().toString(bar.volume)));
 
     constexpr qreal margin = 8;
     const QRectF tb = m_infoText->boundingRect();
@@ -178,20 +186,20 @@ void RsiChart::paintCrosshairAt(double sceneX, qint64 timestampMs)
     m_infoText->setVisible(true);
 }
 
-int RsiChart::nearestSample(qint64 tsMs) const
+int VolumeChart::nearestCandle(qint64 tsMs) const
 {
-    if (m_timestamps.isEmpty()) return -1;
-    int lo = 0, hi = m_timestamps.size() - 1;
+    if (m_lastCandles.isEmpty()) return -1;
+    int lo = 0, hi = m_lastCandles.size() - 1;
     while (lo < hi) {
         const int mid = (lo + hi) / 2;
-        if (m_timestamps[mid].toMSecsSinceEpoch() < tsMs)
+        if (m_lastCandles[mid].timestamp.toMSecsSinceEpoch() < tsMs)
             lo = mid + 1;
         else
             hi = mid;
     }
     if (lo > 0) {
-        const qint64 d0 = qAbs(m_timestamps[lo-1].toMSecsSinceEpoch() - tsMs);
-        const qint64 d1 = qAbs(m_timestamps[lo].toMSecsSinceEpoch()   - tsMs);
+        const qint64 d0 = qAbs(m_lastCandles[lo-1].timestamp.toMSecsSinceEpoch() - tsMs);
+        const qint64 d1 = qAbs(m_lastCandles[lo].timestamp.toMSecsSinceEpoch()   - tsMs);
         if (d0 < d1) --lo;
     }
     return lo;

@@ -6,6 +6,7 @@
 
 class CandleChart;
 class RsiChart;
+class VolumeChart;
 class QComboBox;
 class QScrollArea;
 class QLineEdit;
@@ -31,6 +32,7 @@ private:
 
     YahooFinanceClient* m_client;
     CandleChart*        m_chart;
+    VolumeChart*        m_volumeChart;
     RsiChart*           m_rsiChart;
     QScrollArea*        m_scrollArea;
 
