@@ -27,6 +27,8 @@ qt_add_executable(qt_finance
     src/YahooFinanceClient.h
     src/CandleChart.cpp
     src/CandleChart.h
+    src/RsiChart.cpp
+    src/RsiChart.h
     src/Indicators.cpp
     src/Indicators.h
     src/Candle.h

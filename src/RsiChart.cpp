@@ -1,26 +1,24 @@
-#include "CandleChart.h"
+#include "RsiChart.h"
 
-#include <QCandlestickSeries>
-#include <QCandlestickSet>
 #include <QChart>
 #include <QDateTimeAxis>
 #include <QGraphicsLineItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsTextItem>
 #include <QLineSeries>
-#include <QLocale>
 #include <QMouseEvent>
 #include <QValueAxis>
 
-#include <algorithm>
 #include <cmath>
-#include <limits>
 
-CandleChart::CandleChart(QWidget* parent)
+RsiChart::RsiChart(QWidget* parent)
     : QChartView(parent)
 {
     setRenderHint(QPainter::Antialiasing);
     chart()->setAnimationOptions(QChart::NoAnimation);
+    chart()->setTitle("RSI");
+    chart()->legend()->hide();
+    setFixedHeight(240);
     setMouseTracking(true);
 
     m_crosshairLine = new QGraphicsLineItem();
@@ -44,83 +42,65 @@ CandleChart::CandleChart(QWidget* parent)
     scene()->addItem(m_infoText);
 }
 
-void CandleChart::setData(const QString& symbol, const CandleSeries& candles)
+void RsiChart::clear()
 {
-    m_symbol      = symbol;
-    m_lastCandles = candles;
+    m_timestamps.clear();
+    m_values.clear();
     hideCrosshair();
 
     QChart* c = chart();
     c->removeAllSeries();
     const auto axes = c->axes();
     for (QAbstractAxis* a : axes) c->removeAxis(a);
-
-    auto* series = new QCandlestickSeries();
-    series->setName(symbol);
-    series->setIncreasingColor(QColor(0, 160, 80));
-    series->setDecreasingColor(QColor(200, 50, 50));
-
-    for (const Candle& bar : candles) {
-        auto* set = new QCandlestickSet(
-            bar.open, bar.high, bar.low, bar.close,
-            bar.timestamp.toMSecsSinceEpoch());
-        series->append(set);
-    }
-
-    c->addSeries(series);
-    c->setTitle(symbol);
-    rebuildAxes();
 }
 
-void CandleChart::addOverlay(const QString& name, const QVector<double>& values)
+void RsiChart::setData(const QVector<QDateTime>& timestamps, const QVector<double>& values)
 {
-    if (values.size() != m_lastCandles.size()) return;
+    clear();
+    m_timestamps = timestamps;
+    m_values     = values;
 
-    auto* line = new QLineSeries();
-    line->setName(name);
+    if (timestamps.isEmpty() || values.isEmpty()) return;
+
+    auto* rsiLine = new QLineSeries();
+    rsiLine->setColor(QColor(100, 150, 255));
+
     for (int i = 0; i < values.size(); ++i) {
         if (std::isnan(values[i])) continue;
-        line->append(m_lastCandles[i].timestamp.toMSecsSinceEpoch(), values[i]);
+        rsiLine->append(timestamps[i].toMSecsSinceEpoch(), values[i]);
     }
 
-    QChart* c = chart();
-    c->addSeries(line);
-    for (QAbstractAxis* a : c->axes()) line->attachAxis(a);
-}
+    const qint64 t0 = timestamps.first().toMSecsSinceEpoch();
+    const qint64 t1 = timestamps.last().toMSecsSinceEpoch();
 
-void CandleChart::clearOverlays()
-{
-    QChart* c = chart();
-    const auto seriesList = c->series();
-    for (QAbstractSeries* s : seriesList) {
-        if (qobject_cast<QLineSeries*>(s)) c->removeSeries(s);
-    }
-}
+    auto* obLine = new QLineSeries();
+    QPen obPen(QColor(200, 50, 50));
+    obPen.setStyle(Qt::DashLine);
+    obLine->setPen(obPen);
+    obLine->append(t0, 70);
+    obLine->append(t1, 70);
 
-void CandleChart::rebuildAxes()
-{
-    if (m_lastCandles.isEmpty()) return;
+    auto* osLine = new QLineSeries();
+    QPen osPen(QColor(0, 160, 80));
+    osPen.setStyle(Qt::DashLine);
+    osLine->setPen(osPen);
+    osLine->append(t0, 30);
+    osLine->append(t1, 30);
 
     QChart* c = chart();
+    c->addSeries(rsiLine);
+    c->addSeries(obLine);
+    c->addSeries(osLine);
 
     auto* xAxis = new QDateTimeAxis();
-    xAxis->setFormat("yyyy-MM-dd");
-    xAxis->setTitleText("Date");
-    xAxis->setRange(m_lastCandles.first().timestamp,
-                    m_lastCandles.last().timestamp);
+    xAxis->setFormat("MMM yy");
+    xAxis->setRange(timestamps.first(), timestamps.last());
     c->addAxis(xAxis, Qt::AlignBottom);
 
-    double lo = std::numeric_limits<double>::infinity();
-    double hi = -std::numeric_limits<double>::infinity();
-    for (const Candle& b : m_lastCandles) {
-        lo = std::min(lo, b.low);
-        hi = std::max(hi, b.high);
-    }
-    const double pad = (hi - lo) * 0.05;
-
     auto* yAxis = new QValueAxis();
-    yAxis->setTitleText("Price");
-    yAxis->setRange(lo - pad, hi + pad);
+    yAxis->setRange(0, 100);
+    yAxis->setTickCount(5);
+    yAxis->setTitleText("RSI");
     c->addAxis(yAxis, Qt::AlignLeft);
 
     for (QAbstractSeries* s : c->series()) {
@@ -131,10 +111,10 @@ void CandleChart::rebuildAxes()
 
 // ── mouse events ─────────────────────────────────────────────────────────────
 
-void CandleChart::mouseMoveEvent(QMouseEvent* event)
+void RsiChart::mouseMoveEvent(QMouseEvent* event)
 {
     QChartView::mouseMoveEvent(event);
-    if (m_lastCandles.isEmpty()) return;
+    if (m_timestamps.isEmpty()) return;
 
     const QPointF sp = mapToScene(event->pos());
     const QRectF  pa = chart()->plotArea();
@@ -146,7 +126,7 @@ void CandleChart::mouseMoveEvent(QMouseEvent* event)
     emit crosshairMoved(tsMs);
 }
 
-void CandleChart::leaveEvent(QEvent* event)
+void RsiChart::leaveEvent(QEvent* event)
 {
     QChartView::leaveEvent(event);
     hideCrosshair();
@@ -155,16 +135,16 @@ void CandleChart::leaveEvent(QEvent* event)
 
 // ── public slots ──────────────────────────────────────────────────────────────
 
-void CandleChart::updateCrosshair(qint64 timestampMs)
+void RsiChart::updateCrosshair(qint64 timestampMs)
 {
-    if (m_lastCandles.isEmpty()) return;
+    if (m_timestamps.isEmpty()) return;
     const double sx = chart()->mapToPosition(QPointF(timestampMs, 0)).x();
     const QRectF  pa = chart()->plotArea();
     if (sx >= pa.left() && sx <= pa.right())
         paintCrosshairAt(sx, timestampMs);
 }
 
-void CandleChart::hideCrosshair()
+void RsiChart::hideCrosshair()
 {
     m_crosshairLine->setVisible(false);
     m_infoBg->setVisible(false);
@@ -173,30 +153,17 @@ void CandleChart::hideCrosshair()
 
 // ── private helpers ───────────────────────────────────────────────────────────
 
-void CandleChart::paintCrosshairAt(double sceneX, qint64 timestampMs)
+void RsiChart::paintCrosshairAt(double sceneX, qint64 timestampMs)
 {
     const QRectF pa = chart()->plotArea();
 
     m_crosshairLine->setLine(sceneX, pa.top(), sceneX, pa.bottom());
     m_crosshairLine->setVisible(true);
 
-    const int idx = nearestCandle(timestampMs);
-    if (idx < 0) return;
+    const int idx = nearestSample(timestampMs);
+    if (idx < 0 || std::isnan(m_values[idx])) return;
 
-    const Candle& bar = m_lastCandles[idx];
-    const QString text = QString(
-        "%1\n"
-        "O: %2   H: %3\n"
-        "L: %4   C: %5\n"
-        "V: %6"
-    ).arg(bar.timestamp.toString("yyyy-MM-dd"))
-     .arg(bar.open,  0, 'f', 2)
-     .arg(bar.high,  0, 'f', 2)
-     .arg(bar.low,   0, 'f', 2)
-     .arg(bar.close, 0, 'f', 2)
-     .arg(QLocale().toString(bar.volume));
-
-    m_infoText->setPlainText(text);
+    m_infoText->setPlainText(QString("RSI: %1").arg(m_values[idx], 0, 'f', 1));
 
     constexpr qreal margin = 8;
     const QRectF tb = m_infoText->boundingRect();
@@ -210,20 +177,20 @@ void CandleChart::paintCrosshairAt(double sceneX, qint64 timestampMs)
     m_infoText->setVisible(true);
 }
 
-int CandleChart::nearestCandle(qint64 tsMs) const
+int RsiChart::nearestSample(qint64 tsMs) const
 {
-    if (m_lastCandles.isEmpty()) return -1;
-    int lo = 0, hi = m_lastCandles.size() - 1;
+    if (m_timestamps.isEmpty()) return -1;
+    int lo = 0, hi = m_timestamps.size() - 1;
     while (lo < hi) {
         const int mid = (lo + hi) / 2;
-        if (m_lastCandles[mid].timestamp.toMSecsSinceEpoch() < tsMs)
+        if (m_timestamps[mid].toMSecsSinceEpoch() < tsMs)
             lo = mid + 1;
         else
             hi = mid;
     }
     if (lo > 0) {
-        const qint64 d0 = qAbs(m_lastCandles[lo-1].timestamp.toMSecsSinceEpoch() - tsMs);
-        const qint64 d1 = qAbs(m_lastCandles[lo].timestamp.toMSecsSinceEpoch()   - tsMs);
+        const qint64 d0 = qAbs(m_timestamps[lo-1].toMSecsSinceEpoch() - tsMs);
+        const qint64 d1 = qAbs(m_timestamps[lo].toMSecsSinceEpoch()   - tsMs);
         if (d0 < d1) --lo;
     }
     return lo;

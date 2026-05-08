@@ -5,7 +5,9 @@
 #include <QMainWindow>
 
 class CandleChart;
+class RsiChart;
 class QComboBox;
+class QScrollArea;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
@@ -17,6 +19,8 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
+    bool eventFilter(QObject* obj, QEvent* e) override;
+
 private slots:
     void onFetchClicked();
     void onDataReady(const QString& symbol, const CandleSeries& candles);
@@ -27,6 +31,8 @@ private:
 
     YahooFinanceClient* m_client;
     CandleChart*        m_chart;
+    RsiChart*           m_rsiChart;
+    QScrollArea*        m_scrollArea;
 
     QLineEdit*   m_symbolEdit;
     QComboBox*   m_rangeCombo;

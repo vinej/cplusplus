@@ -1,23 +1,20 @@
 #pragma once
 
-#include "Candle.h"
-
 #include <QChartView>
-#include <QString>
+#include <QDateTime>
 #include <QVector>
 
 class QGraphicsLineItem;
 class QGraphicsRectItem;
 class QGraphicsTextItem;
 
-class CandleChart : public QChartView {
+class RsiChart : public QChartView {
     Q_OBJECT
 public:
-    explicit CandleChart(QWidget* parent = nullptr);
+    explicit RsiChart(QWidget* parent = nullptr);
 
-    void setData(const QString& symbol, const CandleSeries& candles);
-    void addOverlay(const QString& name, const QVector<double>& values);
-    void clearOverlays();
+    void setData(const QVector<QDateTime>& timestamps, const QVector<double>& values);
+    void clear();
 
 signals:
     void crosshairMoved(qint64 timestampMs);
@@ -32,12 +29,11 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
-    void rebuildAxes();
     void paintCrosshairAt(double sceneX, qint64 timestampMs);
-    int  nearestCandle(qint64 timestampMs) const;
+    int  nearestSample(qint64 timestampMs) const;
 
-    CandleSeries m_lastCandles;
-    QString      m_symbol;
+    QVector<QDateTime> m_timestamps;
+    QVector<double>    m_values;
 
     QGraphicsLineItem* m_crosshairLine = nullptr;
     QGraphicsRectItem* m_infoBg        = nullptr;
