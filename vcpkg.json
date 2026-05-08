@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "qt-finance",
+  "version": "0.1.0",
+  "description": "Learning C++ with Qt: Yahoo Finance fetch + TA-Lib indicators + Qt Charts",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": ["gui", "widgets", "network"]
+    },
+    "qtcharts",
+    "talib",
+    "nlohmann-json"
+  ],
+  "builtin-baseline": "20f6043ffd57099b36d9e75944aafd85853de2c5"
+}
