@@ -23,6 +23,22 @@ qt_add_executable(qt_finance
     src/main.cpp
     src/MainWindow.cpp
     src/MainWindow.h
+    src/AnalysisWidget.cpp
+    src/AnalysisWidget.h
+    src/SymbolPicker.cpp
+    src/SymbolPicker.h
+    src/MarketPanel.cpp
+    src/MarketPanel.h
+    src/PerfSincePanel.cpp
+    src/PerfSincePanel.h
+    src/PerfYearPanel.cpp
+    src/PerfYearPanel.h
+    src/PortfolioWidget.cpp
+    src/PortfolioWidget.h
+    src/RiskWidget.cpp
+    src/RiskWidget.h
+    src/AiAssistantWidget.cpp
+    src/AiAssistantWidget.h
     src/YahooFinanceClient.cpp
     src/YahooFinanceClient.h
     src/CandleChart.cpp
