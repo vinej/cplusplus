@@ -28,21 +28,21 @@
 
 // ── static helpers ────────────────────────────────────────────────────────────
 
-// targetDate: the desired "start of period" date.  Binary-searches for the first
-// daily bar on or after targetDate (handles weekends/holidays automatically).
+// Floor search: last bar whose date <= targetDate (handles weekends/holidays by
+// using the preceding trading day, matching standard finance convention).
 static double perfSince(const CandleSeries& candles, const QDate& targetDate)
 {
     if (candles.isEmpty()) return std::numeric_limits<double>::quiet_NaN();
 
     int lo = 0, hi = candles.size() - 1;
     while (lo < hi) {
-        const int mid = (lo + hi) / 2;
-        if (candles[mid].timestamp.date() < targetDate)
-            lo = mid + 1;
+        const int mid = (lo + hi + 1) / 2;  // upper-mid avoids infinite loop for floor search
+        if (candles[mid].timestamp.date() <= targetDate)
+            lo = mid;
         else
-            hi = mid;
+            hi = mid - 1;
     }
-    if (candles[lo].timestamp.date() < targetDate)
+    if (candles[lo].timestamp.date() > targetDate)
         return std::numeric_limits<double>::quiet_NaN();
 
     const double startAdj = candles[lo].adjClose;
@@ -248,7 +248,8 @@ void MainWindow::onFetchClicked()
     statusBar()->showMessage(QString("Fetching %1 %2/%3 ...").arg(symbol, range, interval));
     m_fetchButton->setEnabled(false);
     m_historyCandles.clear();
-    m_maxStartValid = false;
+    m_maxCandles.clear();
+    m_maxCandlesValid = false;
     m_client->fetchDaily(symbol, range, interval);
 }
 
@@ -333,26 +334,29 @@ void MainWindow::onHistoryReady(const QString& symbol, const CandleSeries& candl
 void MainWindow::finalizeHistory(const QString& symbol)
 {
     updatePanels();
+    // Fetch daily bars from epoch-0 up to the start of the 27-year history chain.
+    // The first bar returned is the IPO-day close in the same daily adjClose series
+    // as m_historyCandles, so both endpoints are consistent.
+    const qint64 historyStart = m_historyCandles.isEmpty()
+        ? 0 : m_historyCandles.first().timestamp.toSecsSinceEpoch();
     statusBar()->showMessage(
-        QString("%1: %2 bars | history: %3 daily bars — fetching max...")
+        QString("%1: %2 bars | history: %3 daily bars — fetching early history...")
             .arg(symbol).arg(m_lastCandles.size()).arg(m_historyCandles.size()));
-    // Fetch quarterly data back to IPO for the "max" performance-since calculation.
-    // period1=0 asks Yahoo for all available data from Unix epoch onwards.
-    m_client->fetchByPeriod(symbol, 0, QDateTime::currentSecsSinceEpoch(), "3mo", "max");
+    m_client->fetchByPeriod(symbol, 0, historyStart, "1d", "max");
 }
 
 void MainWindow::onMaxReady(const QString& symbol, const CandleSeries& candles)
 {
     if (!candles.isEmpty()) {
-        m_maxStartCandle = candles.first();
-        m_maxStartValid  = true;
+        m_maxCandles      = candles;
+        m_maxCandlesValid = true;
     }
     updatePanels();
     statusBar()->showMessage(
         QString("%1: %2 bars | history: %3 daily bars | max from %4")
             .arg(symbol).arg(m_lastCandles.size()).arg(m_historyCandles.size())
-            .arg(m_maxStartValid
-                 ? m_maxStartCandle.timestamp.toString("yyyy-MM-dd")
+            .arg(m_maxCandlesValid
+                 ? m_maxCandles.first().timestamp.toString("yyyy-MM-dd")
                  : "N/A"));
 }
 
@@ -506,11 +510,14 @@ void MainWindow::updatePanels()
     applyReturnStyle(m_perfSince[6], perfSince(m_historyCandles, lastDate.addYears(-10)));
     applyReturnStyle(m_perfSince[7], perfSince(m_historyCandles, lastDate.addYears(-20)));
 
-    // max: oldest quarterly bar (back to IPO) → newest daily bar.
-    // m_maxStartCandle comes from a separate range=max&interval=3mo fetch.
-    if (m_maxStartValid) {
-        const double startAdj = m_maxStartCandle.adjClose;
+    // max: earliest daily bar (IPO day) → latest daily bar.
+    // m_maxCandles holds pre-history daily bars; falls back to history start for
+    // stocks that IPO'd within the 27-year history window.
+    {
         const double endAdj   = m_historyCandles.last().adjClose;
+        const double startAdj = (m_maxCandlesValid && !m_maxCandles.isEmpty())
+            ? m_maxCandles.first().adjClose
+            : m_historyCandles.first().adjClose;
         applyReturnStyle(m_perfSince[8], (startAdj == 0.0)
             ? std::numeric_limits<double>::quiet_NaN()
             : (endAdj - startAdj) / startAdj * 100.0);

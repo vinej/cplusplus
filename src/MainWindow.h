@@ -77,9 +77,10 @@ private:
     // Performance Since labels (1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, 20y, max)
     QLabel* m_perfSince[9] = {};
 
-    // Oldest available price for "max" since-IPO calculation (from quarterly fetch).
-    Candle m_maxStartCandle;
-    bool   m_maxStartValid = false;
+    // Quarterly series (period1=0, interval=3mo) covering stock's full life.
+    // Both start and end come from this same series to keep adjClose consistent.
+    CandleSeries m_maxCandles;
+    bool         m_maxCandlesValid = false;
 
     // Performance by Year body layout (rebuilt on each update)
     QGridLayout* m_yearGrid = nullptr;
