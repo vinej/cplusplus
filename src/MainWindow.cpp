@@ -1,15 +1,19 @@
 #include "MainWindow.h"
 
 #include "CandleChart.h"
+#include "CollapsiblePanel.h"
 #include "Indicators.h"
 #include "RsiChart.h"
 #include "VolumeChart.h"
 #include "YahooFinanceClient.h"
 
 #include <QComboBox>
+#include <QDate>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -18,6 +22,92 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <algorithm>
+#include <cmath>
+
+// ── static helpers ────────────────────────────────────────────────────────────
+
+// targetDate: the desired "start of period" date.  Binary-searches for the first
+// daily bar on or after targetDate (handles weekends/holidays automatically).
+static double perfSince(const CandleSeries& candles, const QDate& targetDate)
+{
+    if (candles.isEmpty()) return std::numeric_limits<double>::quiet_NaN();
+
+    int lo = 0, hi = candles.size() - 1;
+    while (lo < hi) {
+        const int mid = (lo + hi) / 2;
+        if (candles[mid].timestamp.date() < targetDate)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (candles[lo].timestamp.date() < targetDate)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    const double startAdj = candles[lo].adjClose;
+    if (startAdj == 0.0) return std::numeric_limits<double>::quiet_NaN();
+    return (candles.last().adjClose - startAdj) / startAdj * 100.0;
+}
+
+static double perfYear(const CandleSeries& candles, int year)
+{
+    if (candles.isEmpty()) return std::numeric_limits<double>::quiet_NaN();
+
+    int first = -1, last = -1;
+    for (int i = 0; i < candles.size(); ++i) {
+        if (candles[i].timestamp.date().year() == year) {
+            if (first == -1) first = i;
+            last = i;
+        }
+    }
+    if (first == -1 || last == -1 || first == last)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    const double startAdj = (first > 0) ? candles[first - 1].adjClose : candles[first].adjClose;
+    if (startAdj == 0.0) return std::numeric_limits<double>::quiet_NaN();
+    return (candles[last].adjClose - startAdj) / startAdj * 100.0;
+}
+
+static CandleSeries filterByRange(const CandleSeries& all, const QString& range)
+{
+    if (range == "max" || all.isEmpty()) return all;
+
+    const qint64 lastTs = all.last().timestamp.toSecsSinceEpoch();
+    qint64 cutoff = 0;
+    if      (range == "1mo") cutoff = lastTs -   30LL * 86400;
+    else if (range == "3mo") cutoff = lastTs -   91LL * 86400;
+    else if (range == "6mo") cutoff = lastTs -  182LL * 86400;
+    else if (range == "1y")  cutoff = lastTs -  365LL * 86400;
+    else if (range == "2y")  cutoff = lastTs -  730LL * 86400;
+    else if (range == "5y")  cutoff = lastTs - 1826LL * 86400;
+    else                     return all;
+
+    int lo = 0, hi = all.size();
+    while (lo < hi) {
+        const int mid = (lo + hi) / 2;
+        if (all[mid].timestamp.toSecsSinceEpoch() < cutoff)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return all.mid(lo);
+}
+
+static void applyReturnStyle(QLabel* lbl, double pct)
+{
+    if (std::isnan(pct)) {
+        lbl->setText("—");
+        lbl->setStyleSheet("color: gray;");
+        return;
+    }
+    const QString sign = (pct >= 0) ? "+" : "";
+    lbl->setText(QString("%1%2%").arg(sign).arg(pct, 0, 'f', 2));
+    lbl->setStyleSheet(pct >= 0 ? "color: #4caf50; font-weight: bold;"
+                                 : "color: #f44336; font-weight: bold;");
+}
+
+// ── MainWindow ────────────────────────────────────────────────────────────────
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -28,6 +118,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_scrollArea(new QScrollArea(this))
     , m_symbolEdit(new QLineEdit("AAPL", this))
     , m_rangeCombo(new QComboBox(this))
+    , m_intervalCombo(new QComboBox(this))
     , m_indicatorCombo(new QComboBox(this))
     , m_periodSpin(new QSpinBox(this))
     , m_fetchButton(new QPushButton("Fetch", this))
@@ -35,8 +126,11 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowTitle("Qt Finance");
     resize(1100, 700);
 
-    m_rangeCombo->addItems({"1mo", "3mo", "6mo", "1y", "2y", "5y", "max"});
+    m_rangeCombo->addItems({"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max"});
     m_rangeCombo->setCurrentText("1y");
+
+    m_intervalCombo->addItems({"1m", "5m", "15m", "30m", "60m", "90m", "1d", "1wk", "1mo"});
+    m_intervalCombo->setCurrentText("1d");
 
     m_indicatorCombo->addItems({"None", "SMA", "EMA", "RSI"});
     m_periodSpin->setRange(2, 200);
@@ -47,12 +141,21 @@ MainWindow::MainWindow(QWidget* parent)
     topRow->addWidget(m_symbolEdit);
     topRow->addWidget(new QLabel("Range:", this));
     topRow->addWidget(m_rangeCombo);
+    topRow->addWidget(new QLabel("Interval:", this));
+    topRow->addWidget(m_intervalCombo);
     topRow->addWidget(new QLabel("Indicator:", this));
     topRow->addWidget(m_indicatorCombo);
     topRow->addWidget(new QLabel("Period:", this));
     topRow->addWidget(m_periodSpin);
     topRow->addWidget(m_fetchButton);
     topRow->addStretch(1);
+
+    buildPanels();
+
+    auto* topPanelsRow = new QHBoxLayout();
+    topPanelsRow->setSpacing(4);
+    topPanelsRow->addWidget(m_marketPanel,    1);
+    topPanelsRow->addWidget(m_perfSincePanel, 2);
 
     m_volumeChart->hide();
     m_rsiChart->hide();
@@ -72,6 +175,8 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* root = new QVBoxLayout();
     root->addLayout(topRow);
+    root->addLayout(topPanelsRow);
+    root->addWidget(m_perfYearPanel);
     root->addWidget(m_scrollArea, /*stretch*/ 1);
 
     auto* central = new QWidget(this);
@@ -84,6 +189,15 @@ MainWindow::MainWindow(QWidget* parent)
             this,          &MainWindow::onFetchClicked);
     connect(m_symbolEdit,  &QLineEdit::returnPressed,
             this,          &MainWindow::onFetchClicked);
+    connect(m_rangeCombo, &QComboBox::currentTextChanged,
+            this, [this](const QString&) {
+        if (m_allCandles.isEmpty()) return;
+        const QString symbol = m_symbolEdit->text().trimmed().toUpper();
+        m_lastCandles = filterByRange(m_allCandles, m_rangeCombo->currentText());
+        m_chart->setData(symbol, m_lastCandles);
+        m_volumeChart->setData(m_lastCandles);
+        applyIndicator();
+    });
     connect(m_indicatorCombo, &QComboBox::currentTextChanged,
             this, [this](const QString&){ applyIndicator(); });
     connect(m_periodSpin, qOverload<int>(&QSpinBox::valueChanged),
@@ -91,6 +205,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(m_client, &YahooFinanceClient::finished,
             this,     &MainWindow::onDataReady);
+    connect(m_client, &YahooFinanceClient::historyReady,
+            this,     &MainWindow::onHistoryReady);
+    connect(m_client, &YahooFinanceClient::maxReady,
+            this,     &MainWindow::onMaxReady);
     connect(m_client, &YahooFinanceClient::failed,
             this,     &MainWindow::onDataFailed);
 
@@ -125,21 +243,117 @@ void MainWindow::onFetchClicked()
 {
     const QString symbol = m_symbolEdit->text().trimmed().toUpper();
     if (symbol.isEmpty()) return;
-    statusBar()->showMessage(QString("Fetching %1 ...").arg(symbol));
+    const QString range    = m_rangeCombo->currentText();
+    const QString interval = m_intervalCombo->currentText();
+    statusBar()->showMessage(QString("Fetching %1 %2/%3 ...").arg(symbol, range, interval));
     m_fetchButton->setEnabled(false);
-    m_client->fetchDaily(symbol, m_rangeCombo->currentText());
+    m_historyCandles.clear();
+    m_maxStartValid = false;
+    m_client->fetchDaily(symbol, range, interval);
 }
 
 void MainWindow::onDataReady(const QString& symbol, const CandleSeries& candles)
 {
     m_fetchButton->setEnabled(true);
-    m_lastCandles = candles;
-    m_chart->setData(symbol, candles);
-    m_volumeChart->setData(candles);
+    m_allCandles = candles;
+
+    m_lastCandles = filterByRange(candles, m_rangeCombo->currentText());
+
+    m_chart->setData(symbol, m_lastCandles);
+    m_volumeChart->setData(m_lastCandles);
     m_volumeChart->show();
+    updatePanels();
     applyIndicator();
+
+    // For non-intraday intervals launch the 3-chunk daily history fetch chain.
+    static const QStringList kIntraday = {"1m", "5m", "15m", "30m", "60m", "90m"};
+    if (!kIntraday.contains(m_intervalCombo->currentText())) {
+        startHistoryFetch(symbol);
+    } else {
+        statusBar()->showMessage(
+            QString("%1: %2 bars").arg(symbol).arg(m_lastCandles.size()));
+    }
+}
+
+void MainWindow::startHistoryFetch(const QString& symbol)
+{
+    // Calendar-based boundaries so leap years are counted exactly.
+    const QDate today = QDate::currentDate();
+    auto toEpoch = [](QDate d) -> qint64 {
+        return QDateTime(d, QTime(0, 0, 0), Qt::UTC).toSecsSinceEpoch();
+    };
+    const qint64 tNow = QDateTime::currentSecsSinceEpoch();
+    const qint64 t9y  = toEpoch(today.addYears(-9));
+    const qint64 t17y = toEpoch(today.addYears(-17));
+    const qint64 t27y = toEpoch(today.addYears(-27));
+
+    m_historySegments = {
+        {t9y,  tNow},  // most recent 9 years
+        {t17y, t9y},   // middle 8 years
+        {t27y, t17y}   // oldest 10 years (covers Dec base for startYear)
+    };
+    m_historyCandles.clear();
     statusBar()->showMessage(
-        QString("%1: %2 bars").arg(symbol).arg(candles.size()));
+        QString("%1: %2 bars — loading history (3 chunks)...").arg(symbol).arg(m_lastCandles.size()));
+    const auto seg = m_historySegments.takeFirst();
+    m_client->fetchByPeriod(symbol, seg.first, seg.second);
+}
+
+void MainWindow::onHistoryReady(const QString& symbol, const CandleSeries& candles)
+{
+    m_historyCandles.append(candles);
+
+    // Sort chronologically and deduplicate by date after each chunk so that
+    // updatePanels() already sees consistent data while loading is in progress.
+    std::sort(m_historyCandles.begin(), m_historyCandles.end(),
+              [](const Candle& a, const Candle& b){
+                  return a.timestamp.toSecsSinceEpoch() < b.timestamp.toSecsSinceEpoch();
+              });
+    int w = 0;
+    for (int i = 0; i < m_historyCandles.size(); ++i) {
+        if (w == 0 || m_historyCandles[i].timestamp.date() != m_historyCandles[w-1].timestamp.date())
+            m_historyCandles[w++] = m_historyCandles[i];
+    }
+    m_historyCandles.resize(w);
+
+    if (!m_historySegments.isEmpty()) {
+        // More chunks — update panels with what we have, then fire next request.
+        updatePanels();
+        statusBar()->showMessage(
+            QString("%1: %2 bars — history %3 bars, %4 chunk(s) remaining...")
+                .arg(symbol).arg(m_lastCandles.size())
+                .arg(m_historyCandles.size()).arg(m_historySegments.size()));
+        const auto seg = m_historySegments.takeFirst();
+        m_client->fetchByPeriod(symbol, seg.first, seg.second);
+    } else {
+        finalizeHistory(symbol);
+    }
+}
+
+void MainWindow::finalizeHistory(const QString& symbol)
+{
+    updatePanels();
+    statusBar()->showMessage(
+        QString("%1: %2 bars | history: %3 daily bars — fetching max...")
+            .arg(symbol).arg(m_lastCandles.size()).arg(m_historyCandles.size()));
+    // Fetch quarterly data back to IPO for the "max" performance-since calculation.
+    // period1=0 asks Yahoo for all available data from Unix epoch onwards.
+    m_client->fetchByPeriod(symbol, 0, QDateTime::currentSecsSinceEpoch(), "3mo", "max");
+}
+
+void MainWindow::onMaxReady(const QString& symbol, const CandleSeries& candles)
+{
+    if (!candles.isEmpty()) {
+        m_maxStartCandle = candles.first();
+        m_maxStartValid  = true;
+    }
+    updatePanels();
+    statusBar()->showMessage(
+        QString("%1: %2 bars | history: %3 daily bars | max from %4")
+            .arg(symbol).arg(m_lastCandles.size()).arg(m_historyCandles.size())
+            .arg(m_maxStartValid
+                 ? m_maxStartCandle.timestamp.toString("yyyy-MM-dd")
+                 : "N/A"));
 }
 
 void MainWindow::onDataFailed(const QString& symbol, const QString& message)
@@ -178,4 +392,179 @@ void MainWindow::applyIndicator()
     if      (name == "SMA") values = Indicators::sma(closes, period);
     else if (name == "EMA") values = Indicators::ema(closes, period);
     m_chart->addOverlay(QString("%1(%2)").arg(name).arg(period), values);
+}
+
+// ── panel construction ────────────────────────────────────────────────────────
+
+void MainWindow::buildPanels()
+{
+    // ── Current Market ────────────────────────────────────────────────────────
+    m_marketPanel = new CollapsiblePanel("Current Market", this);
+    {
+        auto* grid = new QGridLayout(m_marketPanel->body());
+        grid->setContentsMargins(8, 4, 8, 4);
+        grid->setHorizontalSpacing(12);
+        grid->setVerticalSpacing(2);
+
+        auto makeValueLabel = [](QWidget* parent) {
+            auto* l = new QLabel("—", parent);
+            l->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            return l;
+        };
+
+        grid->addWidget(new QLabel("Date:",   m_marketPanel->body()), 0, 0);
+        m_mktDate = makeValueLabel(m_marketPanel->body());
+        grid->addWidget(m_mktDate, 0, 1);
+
+        grid->addWidget(new QLabel("Open:",   m_marketPanel->body()), 1, 0);
+        m_mktOpen = makeValueLabel(m_marketPanel->body());
+        grid->addWidget(m_mktOpen, 1, 1);
+
+        grid->addWidget(new QLabel("High:",   m_marketPanel->body()), 2, 0);
+        m_mktHigh = makeValueLabel(m_marketPanel->body());
+        grid->addWidget(m_mktHigh, 2, 1);
+
+        grid->addWidget(new QLabel("Low:",    m_marketPanel->body()), 3, 0);
+        m_mktLow = makeValueLabel(m_marketPanel->body());
+        grid->addWidget(m_mktLow, 3, 1);
+
+        grid->addWidget(new QLabel("Close:",  m_marketPanel->body()), 4, 0);
+        m_mktClose = makeValueLabel(m_marketPanel->body());
+        grid->addWidget(m_mktClose, 4, 1);
+
+        grid->addWidget(new QLabel("Volume:", m_marketPanel->body()), 5, 0);
+        m_mktVol = makeValueLabel(m_marketPanel->body());
+        grid->addWidget(m_mktVol, 5, 1);
+
+        grid->setColumnStretch(1, 1);
+    }
+
+    // ── Performance Since ─────────────────────────────────────────────────────
+    m_perfSincePanel = new CollapsiblePanel("Performance Since", this);
+    {
+        static const char* kLabels[] = {
+            "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "20y", "max"
+        };
+        constexpr int kCount = 9;
+
+        auto* hbox = new QHBoxLayout(m_perfSincePanel->body());
+        hbox->setContentsMargins(8, 4, 8, 4);
+        hbox->setSpacing(8);
+
+        for (int i = 0; i < kCount; ++i) {
+            auto* box = new QWidget(m_perfSincePanel->body());
+            auto* vl  = new QVBoxLayout(box);
+            vl->setContentsMargins(4, 2, 4, 2);
+            vl->setSpacing(1);
+
+            auto* lbl = new QLabel(kLabels[i], box);
+            lbl->setAlignment(Qt::AlignCenter);
+            lbl->setStyleSheet("color: gray; font-size: 10px;");
+
+            m_perfSince[i] = new QLabel("—", box);
+            m_perfSince[i]->setAlignment(Qt::AlignCenter);
+
+            vl->addWidget(lbl);
+            vl->addWidget(m_perfSince[i]);
+            hbox->addWidget(box);
+        }
+        hbox->addStretch(1);
+    }
+
+    // ── Performance by Year ───────────────────────────────────────────────────
+    m_perfYearPanel = new CollapsiblePanel("Performance by Year", this);
+    // m_yearGrid is created / rebuilt in updatePanels()
+}
+
+// ── panel update ──────────────────────────────────────────────────────────────
+
+void MainWindow::updatePanels()
+{
+    if (m_allCandles.isEmpty()) return;
+
+    // Current Market — use last available bar (same close regardless of range)
+    const Candle& last = m_allCandles.last();
+    m_mktDate ->setText(last.timestamp.toString("yyyy-MM-dd"));
+    m_mktOpen ->setText(QString::number(last.open,  'f', 2));
+    m_mktHigh ->setText(QString::number(last.high,  'f', 2));
+    m_mktLow  ->setText(QString::number(last.low,   'f', 2));
+    m_mktClose->setText(QString::number(last.close, 'f', 2));
+    m_mktVol  ->setText(QLocale().toString(static_cast<qint64>(last.volume)));
+
+    // Performance panels require completed history data.
+    if (m_historyCandles.isEmpty()) return;
+
+    // Performance Since — use addYears() for year-based periods so leap years
+    // are handled correctly (addDays(-3650) ≠ 10 calendar years).
+    const QDate lastDate = m_historyCandles.last().timestamp.date();
+    applyReturnStyle(m_perfSince[0], perfSince(m_historyCandles, lastDate.addDays(-30)));
+    applyReturnStyle(m_perfSince[1], perfSince(m_historyCandles, lastDate.addDays(-91)));
+    applyReturnStyle(m_perfSince[2], perfSince(m_historyCandles, lastDate.addDays(-182)));
+    applyReturnStyle(m_perfSince[3], perfSince(m_historyCandles, lastDate.addYears(-1)));
+    applyReturnStyle(m_perfSince[4], perfSince(m_historyCandles, lastDate.addYears(-2)));
+    applyReturnStyle(m_perfSince[5], perfSince(m_historyCandles, lastDate.addYears(-5)));
+    applyReturnStyle(m_perfSince[6], perfSince(m_historyCandles, lastDate.addYears(-10)));
+    applyReturnStyle(m_perfSince[7], perfSince(m_historyCandles, lastDate.addYears(-20)));
+
+    // max: oldest quarterly bar (back to IPO) → newest daily bar.
+    // m_maxStartCandle comes from a separate range=max&interval=3mo fetch.
+    if (m_maxStartValid) {
+        const double startAdj = m_maxStartCandle.adjClose;
+        const double endAdj   = m_historyCandles.last().adjClose;
+        applyReturnStyle(m_perfSince[8], (startAdj == 0.0)
+            ? std::numeric_limits<double>::quiet_NaN()
+            : (endAdj - startAdj) / startAdj * 100.0);
+    }
+
+    // Performance by Year — rebuild grid using full history
+    QWidget* body = m_perfYearPanel->body();
+
+    if (QLayout* old = body->layout()) {
+        QLayoutItem* item;
+        while ((item = old->takeAt(0)) != nullptr) {
+            delete item->widget();
+            delete item;
+        }
+        delete old;
+    }
+
+    const QDate today     = QDate::currentDate();
+    const int currentYear = today.year();
+    const int startYear   = today.addYears(-26).year();
+
+    m_yearGrid = new QGridLayout(body);
+    m_yearGrid->setContentsMargins(8, 4, 8, 4);
+    m_yearGrid->setHorizontalSpacing(8);
+    m_yearGrid->setVerticalSpacing(3);
+
+    constexpr int kCols = 5;
+    int col = 0, row = 0;
+
+    for (int y = currentYear; y >= startYear; --y) {
+        const double pct = perfYear(m_historyCandles, y);
+
+        auto* box = new QWidget(body);
+        auto* vl  = new QVBoxLayout(box);
+        vl->setContentsMargins(2, 1, 2, 1);
+        vl->setSpacing(0);
+
+        QString yearLabel = QString::number(y);
+        if (y == currentYear) yearLabel += " YTD";
+
+        auto* yearLbl = new QLabel(yearLabel, box);
+        yearLbl->setAlignment(Qt::AlignCenter);
+        yearLbl->setStyleSheet("color: gray; font-size: 10px;");
+
+        auto* retLbl = new QLabel("—", box);
+        retLbl->setAlignment(Qt::AlignCenter);
+        applyReturnStyle(retLbl, pct);
+
+        vl->addWidget(yearLbl);
+        vl->addWidget(retLbl);
+
+        m_yearGrid->addWidget(box, row, col);
+
+        ++col;
+        if (col >= kCols) { col = 0; ++row; }
+    }
 }
