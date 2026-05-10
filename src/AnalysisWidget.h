@@ -10,7 +10,6 @@ class PerfSincePanel;
 class PerfYearPanel;
 class RsiChart;
 class SymbolPicker;
-class VolumeChart;
 class QComboBox;
 class QScrollArea;
 class QSpinBox;
@@ -39,7 +38,6 @@ private:
 
     YahooFinanceClient* m_client;
     CandleChart*        m_chart;
-    VolumeChart*        m_volumeChart;
     RsiChart*           m_rsiChart;
     QScrollArea*        m_scrollArea;
 

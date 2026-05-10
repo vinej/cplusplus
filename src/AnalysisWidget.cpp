@@ -8,7 +8,6 @@
 #include "PortfolioAnalysisWidget.h"
 #include "RsiChart.h"
 #include "SymbolPicker.h"
-#include "VolumeChart.h"
 #include "YahooFinanceClient.h"
 
 #include <QComboBox>
@@ -29,7 +28,6 @@ AnalysisWidget::AnalysisWidget(QWidget* parent)
     : QWidget(parent)
     , m_client(new YahooFinanceClient(this))
     , m_chart(new CandleChart(this))
-    , m_volumeChart(new VolumeChart(this))
     , m_rsiChart(new RsiChart(this))
     , m_scrollArea(new QScrollArea(this))
     , m_symbolPicker(new SymbolPicker(this))
@@ -56,7 +54,6 @@ AnalysisWidget::AnalysisWidget(QWidget* parent)
     topPanelsRow->addWidget(m_marketPanel,    1);
     topPanelsRow->addWidget(m_perfSincePanel, 2);
 
-    m_volumeChart->hide();
     m_rsiChart->hide();
 
     auto* chartsContainer = new QWidget(this);
@@ -64,7 +61,6 @@ AnalysisWidget::AnalysisWidget(QWidget* parent)
     chartsLayout->setContentsMargins(0, 0, 0, 0);
     chartsLayout->setSpacing(0);
     chartsLayout->addWidget(m_chart);
-    chartsLayout->addWidget(m_volumeChart);
     chartsLayout->addWidget(m_rsiChart);
 
     m_scrollArea->setWidget(chartsContainer);
@@ -118,20 +114,10 @@ AnalysisWidget::AnalysisWidget(QWidget* parent)
     connect(m_client, &YahooFinanceClient::failed,
             this,     &AnalysisWidget::onFetchFailed);
 
-    connect(m_chart,       &CandleChart::crosshairMoved,  m_volumeChart, &VolumeChart::updateCrosshair);
-    connect(m_chart,       &CandleChart::crosshairLeft,   m_volumeChart, &VolumeChart::hideCrosshair);
-    connect(m_chart,       &CandleChart::crosshairMoved,  m_rsiChart,    &RsiChart::updateCrosshair);
-    connect(m_chart,       &CandleChart::crosshairLeft,   m_rsiChart,    &RsiChart::hideCrosshair);
-
-    connect(m_volumeChart, &VolumeChart::crosshairMoved,  m_chart,       &CandleChart::updateCrosshair);
-    connect(m_volumeChart, &VolumeChart::crosshairLeft,   m_chart,       &CandleChart::hideCrosshair);
-    connect(m_volumeChart, &VolumeChart::crosshairMoved,  m_rsiChart,    &RsiChart::updateCrosshair);
-    connect(m_volumeChart, &VolumeChart::crosshairLeft,   m_rsiChart,    &RsiChart::hideCrosshair);
-
-    connect(m_rsiChart,    &RsiChart::crosshairMoved,     m_chart,       &CandleChart::updateCrosshair);
-    connect(m_rsiChart,    &RsiChart::crosshairLeft,      m_chart,       &CandleChart::hideCrosshair);
-    connect(m_rsiChart,    &RsiChart::crosshairMoved,     m_volumeChart, &VolumeChart::updateCrosshair);
-    connect(m_rsiChart,    &RsiChart::crosshairLeft,      m_volumeChart, &VolumeChart::hideCrosshair);
+    connect(m_chart,    &CandleChart::crosshairMoved, m_rsiChart, &RsiChart::updateCrosshair);
+    connect(m_chart,    &CandleChart::crosshairLeft,  m_rsiChart, &RsiChart::hideCrosshair);
+    connect(m_rsiChart, &RsiChart::crosshairMoved,    m_chart,    &CandleChart::updateCrosshair);
+    connect(m_rsiChart, &RsiChart::crosshairLeft,     m_chart,    &CandleChart::hideCrosshair);
 }
 
 bool AnalysisWidget::eventFilter(QObject* obj, QEvent* e)
@@ -179,8 +165,6 @@ void AnalysisWidget::onFetchFinished(const QString& symbol,
     if (tag == "chart" || tag == "chart-only") {
         m_lastCandles = candles;
         m_chart->setData(symbol, m_lastCandles);
-        m_volumeChart->setData(m_lastCandles);
-        m_volumeChart->show();
         updatePanels();
         applyIndicator();
 

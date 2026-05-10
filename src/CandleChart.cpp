@@ -10,11 +10,14 @@
 #include <QLineSeries>
 #include <QLocale>
 #include <QMouseEvent>
+#include <QPen>
 #include <QValueAxis>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+
+static constexpr double kVolScale = 1e6; // display in millions
 
 CandleChart::CandleChart(QWidget* parent)
     : QChartView(parent)
@@ -49,33 +52,105 @@ void CandleChart::setData(const QString& symbol, const CandleSeries& candles)
 {
     m_symbol      = symbol;
     m_lastCandles = candles;
+    m_xAxis       = nullptr;
+    m_priceAxis   = nullptr;
+    m_volAxis     = nullptr;
     hideCrosshair();
 
     QChart* c = chart();
     c->removeAllSeries();
-    const auto axes = c->axes();
-    for (QAbstractAxis* a : axes) c->removeAxis(a);
+    for (QAbstractAxis* a : c->axes()) c->removeAxis(a);
+    c->legend()->hide();
 
-    auto* series = new QCandlestickSeries();
-    series->setName(symbol);
-    series->setIncreasingColor(QColor(0, 160, 80));
-    series->setDecreasingColor(QColor(200, 50, 50));
+    if (candles.isEmpty()) return;
 
+    // ── Candle series ─────────────────────────────────────────────────────────
+    auto* candleSeries = new QCandlestickSeries();
+    candleSeries->setName(symbol);
+    candleSeries->setIncreasingColor(QColor(0, 160, 80));
+    candleSeries->setDecreasingColor(QColor(200, 50, 50));
     for (const Candle& bar : candles) {
-        auto* set = new QCandlestickSet(
+        candleSeries->append(new QCandlestickSet(
             bar.open, bar.high, bar.low, bar.close,
-            bar.timestamp.toMSecsSinceEpoch());
-        series->append(set);
+            bar.timestamp.toMSecsSinceEpoch()));
     }
 
-    c->addSeries(series);
+    // ── Volume series (bull / bear, semi-transparent) ─────────────────────────
+    double maxVol = 0.0;
+    for (const Candle& bar : candles)
+        maxVol = std::max(maxVol, static_cast<double>(bar.volume));
+    const bool hasVolume = maxVol > 0.0;
+
+    auto makeVolSeries = [](QColor color) {
+        auto* s = new QCandlestickSeries();
+        s->setBodyWidth(0.7);
+        s->setIncreasingColor(color);
+        s->setDecreasingColor(color);
+        QPen p(color); p.setWidthF(0.3);
+        s->setPen(p);
+        return s;
+    };
+
+    QCandlestickSeries* bullVol = nullptr;
+    QCandlestickSeries* bearVol = nullptr;
+    if (hasVolume) {
+        bullVol = makeVolSeries(QColor(0,   160,  80, 70));
+        bearVol = makeVolSeries(QColor(200,  50,  50, 70));
+        for (const Candle& bar : candles) {
+            const double vol = bar.volume / kVolScale;
+            const qint64 ts  = bar.timestamp.toMSecsSinceEpoch();
+            if (bar.close >= bar.open)
+                bullVol->append(new QCandlestickSet(0, vol, 0, vol, ts));
+            else
+                bearVol->append(new QCandlestickSet(vol, vol, 0, 0, ts));
+        }
+    }
+
+    // ── Axes ──────────────────────────────────────────────────────────────────
+    m_xAxis = new QDateTimeAxis();
+    m_xAxis->setFormat("yyyy-MM-dd");
+    m_xAxis->setTitleText("Date");
+    m_xAxis->setRange(candles.first().timestamp, candles.last().timestamp);
+    c->addAxis(m_xAxis, Qt::AlignBottom);
+
+    double lo = std::numeric_limits<double>::infinity();
+    double hi = -std::numeric_limits<double>::infinity();
+    for (const Candle& b : candles) { lo = std::min(lo, b.low); hi = std::max(hi, b.high); }
+    const double pad = (hi - lo) * 0.05;
+
+    m_priceAxis = new QValueAxis();
+    m_priceAxis->setTitleText("Price");
+    m_priceAxis->setRange(lo - pad, hi + pad);
+    c->addAxis(m_priceAxis, Qt::AlignLeft);
+
+    // Add series to chart and attach to price axes.
+    c->addSeries(candleSeries);
+    candleSeries->attachAxis(m_xAxis);
+    candleSeries->attachAxis(m_priceAxis);
+
+    if (hasVolume) {
+        // Volume axis on the right: range 0 → maxVol×4 keeps bars in bottom 25%.
+        m_volAxis = new QValueAxis();
+        m_volAxis->setTitleText("Vol (M)");
+        m_volAxis->setLabelFormat("%.0f");
+        m_volAxis->setTickCount(3);
+        m_volAxis->setRange(0, (maxVol / kVolScale) * 4.0);
+        c->addAxis(m_volAxis, Qt::AlignRight);
+
+        c->addSeries(bullVol);
+        c->addSeries(bearVol);
+        bullVol->attachAxis(m_xAxis);
+        bullVol->attachAxis(m_volAxis);
+        bearVol->attachAxis(m_xAxis);
+        bearVol->attachAxis(m_volAxis);
+    }
+
     c->setTitle(symbol);
-    rebuildAxes();
 }
 
 void CandleChart::addOverlay(const QString& name, const QVector<double>& values)
 {
-    if (values.size() != m_lastCandles.size()) return;
+    if (values.size() != m_lastCandles.size() || !m_xAxis || !m_priceAxis) return;
 
     auto* line = new QLineSeries();
     line->setName(name);
@@ -84,9 +159,10 @@ void CandleChart::addOverlay(const QString& name, const QVector<double>& values)
         line->append(m_lastCandles[i].timestamp.toMSecsSinceEpoch(), values[i]);
     }
 
-    QChart* c = chart();
-    c->addSeries(line);
-    for (QAbstractAxis* a : c->axes()) line->attachAxis(a);
+    chart()->addSeries(line);
+    // Attach only to price axes — NOT to the volume right axis.
+    line->attachAxis(m_xAxis);
+    line->attachAxis(m_priceAxis);
 }
 
 void CandleChart::clearOverlays()
@@ -95,38 +171,6 @@ void CandleChart::clearOverlays()
     const auto seriesList = c->series();
     for (QAbstractSeries* s : seriesList) {
         if (qobject_cast<QLineSeries*>(s)) c->removeSeries(s);
-    }
-}
-
-void CandleChart::rebuildAxes()
-{
-    if (m_lastCandles.isEmpty()) return;
-
-    QChart* c = chart();
-
-    auto* xAxis = new QDateTimeAxis();
-    xAxis->setFormat("yyyy-MM-dd");
-    xAxis->setTitleText("Date");
-    xAxis->setRange(m_lastCandles.first().timestamp,
-                    m_lastCandles.last().timestamp);
-    c->addAxis(xAxis, Qt::AlignBottom);
-
-    double lo = std::numeric_limits<double>::infinity();
-    double hi = -std::numeric_limits<double>::infinity();
-    for (const Candle& b : m_lastCandles) {
-        lo = std::min(lo, b.low);
-        hi = std::max(hi, b.high);
-    }
-    const double pad = (hi - lo) * 0.05;
-
-    auto* yAxis = new QValueAxis();
-    yAxis->setTitleText("Price");
-    yAxis->setRange(lo - pad, hi + pad);
-    c->addAxis(yAxis, Qt::AlignLeft);
-
-    for (QAbstractSeries* s : c->series()) {
-        s->attachAxis(xAxis);
-        s->attachAxis(yAxis);
     }
 }
 
