@@ -21,14 +21,25 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* analysis  = new AnalysisWidget(this);
     auto* portfolio = new PortfolioWidget(this);
+    auto* risk      = new RiskWidget(this);
+
     connectStatus(analysis);
     connectStatus(portfolio);
+    connectStatus(risk);
 
     auto* tabs = new QTabWidget(this);
     tabs->addTab(analysis,                    "Analysis");
     tabs->addTab(portfolio,                   "Portfolio");
-    tabs->addTab(new RiskWidget(this),        "Risk");
+    tabs->addTab(risk,                        "Risk");
     tabs->addTab(new AiAssistantWidget(this), "AI Assistant");
+
+    // Refresh portfolio picker whenever the Risk tab becomes active so that
+    // portfolios created in the Portfolio tab are immediately visible.
+    connect(tabs, &QTabWidget::currentChanged, this,
+            [tabs, risk](int index) {
+                if (tabs->widget(index) == risk)
+                    risk->loadPortfolios();
+            });
 
     setCentralWidget(tabs);
     statusBar()->showMessage("Ready");

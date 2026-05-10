@@ -89,3 +89,15 @@ If you're new to Qt, read in this order:
   produce multiple output arrays, so the wrapper helper needs adjusting)
 - Save user state (last symbol, range) with `QSettings`
 - Switch off the network and load from a CSV instead — handy for offline work
+
+Annual Return     = (end/start)^(252/n) - 1
+Annual Volatility = stddev(daily_returns) × √252
+Sharpe Ratio      = (annual_return - risk_free) / annual_volatility
+Std Deviation     = sample stddev of daily_returns
+Skewness          = (1/n) × Σ((r - μ)³) / σ³
+Kurtosis (excess) = (1/n) × Σ((r - μ)⁴) / σ⁴ - 3
+VaR (95%, 1d)     = 5th-percentile of sorted daily_returns
+CVaR (95%, 1d)    = mean of all returns ≤ VaR
+Correlation       = pairwise: cov(X,Y) / (σx × σy)
+Beta              = cov(portfolio, SPY) / var(SPY)
+Alpha             = annual_return - (risk_free + β × (SPY_return - risk_free))
