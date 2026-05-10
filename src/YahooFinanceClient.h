@@ -47,7 +47,8 @@ public:
                const QString& tag = QString());
 
 signals:
-    void finished(const QString& symbol, const QString& tag, const CandleSeries& candles);
+    void finished(const QString& symbol, const QString& tag,
+                  const CandleSeries& candles, const QString& name);
     void failed  (const QString& symbol, const QString& tag, const QString& errorMessage);
 
 private slots:
@@ -58,6 +59,7 @@ private:
         QString      symbol;
         QString      interval;
         QString      tag;
+        QString      name;                        // shortName from meta (first chunk wins)
         QVector<QPair<qint64,qint64>> pending;   // remaining (period1,period2) pairs
         CandleSeries accumulated;
     };
@@ -73,7 +75,7 @@ private:
     static QVector<QPair<qint64,qint64>> buildChunks(const QDate& start,
                                                        const QDate& end,
                                                        int maxDays);
-    CandleSeries parseCandles(const QByteArray& body, QString& outError) const;
+    CandleSeries parseCandles(const QByteArray& body, QString& outError, QString& outName) const;
     void fireNext(const QString& jobId);
 
     QNetworkAccessManager* m_net;

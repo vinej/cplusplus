@@ -101,3 +101,54 @@ void PerfYearPanel::update(const CandleSeries& history)
         if (col >= kCols) { col = 0; ++row; }
     }
 }
+
+void PerfYearPanel::update(const QMap<int,double>& returnsByYear)
+{
+    if (returnsByYear.isEmpty()) return;
+
+    if (QLayout* old = body()->layout()) {
+        QLayoutItem* item;
+        while ((item = old->takeAt(0)) != nullptr) {
+            delete item->widget();
+            delete item;
+        }
+        delete old;
+    }
+
+    const QDate today       = QDate::currentDate();
+    const int   currentYear = today.year();
+    const int   startYear   = today.addYears(-26).year();
+
+    m_grid = new QGridLayout(body());
+    m_grid->setContentsMargins(8, 4, 8, 4);
+    m_grid->setHorizontalSpacing(8);
+    m_grid->setVerticalSpacing(3);
+
+    constexpr int kCols = 5;
+    int col = 0, row = 0;
+
+    for (int y = currentYear; y >= startYear; --y) {
+        auto* box = new QWidget(body());
+        auto* vl  = new QVBoxLayout(box);
+        vl->setContentsMargins(2, 1, 2, 1);
+        vl->setSpacing(0);
+
+        QString yearLabel = QString::number(y);
+        if (y == currentYear) yearLabel += " YTD";
+
+        auto* yearLbl = new QLabel(yearLabel, box);
+        yearLbl->setAlignment(Qt::AlignCenter);
+        yearLbl->setStyleSheet("color: gray; font-size: 10px;");
+
+        auto* retLbl = new QLabel("—", box);
+        retLbl->setAlignment(Qt::AlignCenter);
+        applyReturnStyle(retLbl, returnsByYear.value(y, std::numeric_limits<double>::quiet_NaN()));
+
+        vl->addWidget(yearLbl);
+        vl->addWidget(retLbl);
+
+        m_grid->addWidget(box, row, col);
+        ++col;
+        if (col >= kCols) { col = 0; ++row; }
+    }
+}

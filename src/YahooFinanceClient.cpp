@@ -92,7 +92,7 @@ void YahooFinanceClient::fetch(const QString& symbol,
     QDate effectiveEnd = (endDate.isValid() && endDate <= today) ? endDate : today;
 
     if (effectiveStart > effectiveEnd) {
-        emit finished(symbol, tag, CandleSeries{});
+        emit finished(symbol, tag, CandleSeries{}, QString());
         return;
     }
 
@@ -142,7 +142,8 @@ void YahooFinanceClient::fireNext(const QString& jobId)
 }
 
 CandleSeries YahooFinanceClient::parseCandles(const QByteArray& body,
-                                               QString& outError) const
+                                               QString& outError,
+                                               QString& outName) const
 {
     json doc;
     try {
@@ -158,6 +159,16 @@ CandleSeries YahooFinanceClient::parseCandles(const QByteArray& body,
             return {}; // no data for this period — not an error
 
         const auto& r0         = result.at(0);
+
+        // Extract display name from meta (shortName preferred over longName).
+        if (r0.contains("meta")) {
+            const auto& meta = r0.at("meta");
+            if (meta.contains("shortName") && meta["shortName"].is_string())
+                outName = QString::fromStdString(meta["shortName"].get<std::string>());
+            else if (meta.contains("longName") && meta["longName"].is_string())
+                outName = QString::fromStdString(meta["longName"].get<std::string>());
+        }
+
         const auto& timestamps = r0.at("timestamp");
         const auto& indicators = r0.at("indicators");
         const auto& quote      = indicators.at("quote").at(0);
@@ -217,8 +228,8 @@ void YahooFinanceClient::onReplyFinished(QNetworkReply* reply)
         return;
     }
 
-    QString err;
-    const CandleSeries chunk = parseCandles(reply->readAll(), err);
+    QString err, name;
+    const CandleSeries chunk = parseCandles(reply->readAll(), err, name);
     if (!err.isEmpty()) {
         const QString sym = job.symbol, tag = job.tag;
         m_jobs.remove(jobId);
@@ -226,6 +237,7 @@ void YahooFinanceClient::onReplyFinished(QNetworkReply* reply)
         return;
     }
 
+    if (job.name.isEmpty()) job.name = name; // first chunk with a name wins
     job.accumulated.append(chunk);
     job.pending.removeFirst();
 
@@ -246,8 +258,8 @@ void YahooFinanceClient::onReplyFinished(QNetworkReply* reply)
     }
     acc.resize(w);
 
-    const QString sym = job.symbol, tag = job.tag;
+    const QString sym = job.symbol, tag = job.tag, jobName = job.name;
     CandleSeries result = std::move(job.accumulated);
     m_jobs.remove(jobId);
-    emit finished(sym, tag, result);
+    emit finished(sym, tag, result, jobName);
 }

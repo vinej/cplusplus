@@ -12,6 +12,8 @@ public:
     void update(const CandleSeries& history,
                 const CandleSeries& maxCandles = {},
                 bool maxCandlesValid = false);
+    // Pre-computed overload for portfolio view (9 values: 1mo…max, NaN = no data).
+    void update(const QVector<double>& periodReturns);
 
 private:
     QLabel* m_perf[9] = {};

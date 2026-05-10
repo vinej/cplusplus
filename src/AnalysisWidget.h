@@ -14,6 +14,7 @@ class VolumeChart;
 class QComboBox;
 class QScrollArea;
 class QSpinBox;
+class QTabWidget;
 class YahooFinanceClient;
 
 class AnalysisWidget : public QWidget {
@@ -28,7 +29,7 @@ signals:
 
 private slots:
     void onFetchClicked();
-    void onFetchFinished(const QString& symbol, const QString& tag, const CandleSeries& candles);
+    void onFetchFinished(const QString& symbol, const QString& tag, const CandleSeries& candles, const QString& name);
     void onFetchFailed  (const QString& symbol, const QString& tag, const QString& message);
 
 private:

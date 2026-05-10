@@ -5,6 +5,7 @@
 #include "MarketPanel.h"
 #include "PerfSincePanel.h"
 #include "PerfYearPanel.h"
+#include "PortfolioAnalysisWidget.h"
 #include "RsiChart.h"
 #include "SymbolPicker.h"
 #include "VolumeChart.h"
@@ -18,6 +19,7 @@
 #include <QEvent>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QTabWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -70,12 +72,35 @@ AnalysisWidget::AnalysisWidget(QWidget* parent)
     m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->viewport()->installEventFilter(this);
 
+    // ── "By Symbol" page — wraps all existing content ────────────────────────
+    auto* bySymbolPage = new QWidget(this);
+    auto* bsRoot = new QVBoxLayout(bySymbolPage);
+    bsRoot->setContentsMargins(4, 4, 4, 4);
+    bsRoot->addLayout(topRow);
+    bsRoot->addLayout(topPanelsRow);
+    bsRoot->addWidget(m_perfYearPanel);
+    bsRoot->addWidget(m_scrollArea, 1);
+
+    // ── "By Portfolio" page ───────────────────────────────────────────────────
+    auto* byPortfolioPage = new PortfolioAnalysisWidget(this);
+    connect(byPortfolioPage, &PortfolioAnalysisWidget::statusMessage,
+            this,            &AnalysisWidget::statusMessage);
+
+    auto* innerTabs = new QTabWidget(this);
+    innerTabs->addTab(bySymbolPage,    "By Symbol");
+    innerTabs->addTab(byPortfolioPage, "By Portfolio");
+
+    // Refresh the portfolio list whenever the By Portfolio tab is shown,
+    // so portfolios created in the Portfolio tab are immediately visible.
+    connect(innerTabs, &QTabWidget::currentChanged, this,
+            [innerTabs, byPortfolioPage](int index) {
+                if (innerTabs->widget(index) == byPortfolioPage)
+                    byPortfolioPage->loadPortfolios();
+            });
+
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(4, 4, 4, 4);
-    root->addLayout(topRow);
-    root->addLayout(topPanelsRow);
-    root->addWidget(m_perfYearPanel);
-    root->addWidget(m_scrollArea, 1);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->addWidget(innerTabs, 1);
 
     connect(m_symbolPicker, &SymbolPicker::fetchRequested,
             this,           &AnalysisWidget::onFetchClicked);
@@ -146,7 +171,8 @@ void AnalysisWidget::fetchChartOnly()
 
 void AnalysisWidget::onFetchFinished(const QString& symbol,
                                       const QString& tag,
-                                      const CandleSeries& candles)
+                                      const CandleSeries& candles,
+                                      const QString& /*name*/)
 {
     static const QStringList kIntraday = {"1m","5m","15m","30m","60m","90m"};
 

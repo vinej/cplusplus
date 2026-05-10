@@ -99,3 +99,9 @@ void PerfSincePanel::update(const CandleSeries& history,
         ? std::numeric_limits<double>::quiet_NaN()
         : (endAdj - startAdj) / startAdj * 100.0);
 }
+
+void PerfSincePanel::update(const QVector<double>& periodReturns)
+{
+    for (int i = 0; i < 9 && i < periodReturns.size(); ++i)
+        applyReturnStyle(m_perf[i], periodReturns[i]);
+}
