@@ -117,6 +117,7 @@ void SymbolSearchEdit::onSearchResults(const QList<SymbolResult>& results)
 
     m_ignoreEdit = true;
     m_symbolCombo->blockSignals(true);
+    m_symbolCombo->hidePopup(); // must close before modifying the model
     m_symbolCombo->clear();
     for (const SymbolResult& r : results) {
         const QString display =

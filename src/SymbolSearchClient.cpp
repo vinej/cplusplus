@@ -23,10 +23,14 @@ void SymbolSearchClient::search(const QString& query, const QString& typeFilter)
     }
     m_pendingType = typeFilter;
 
+    // Request more results when filtering by a specific type so that
+    // lower-ranked items (e.g. ^GSPC for query "500") survive the client-side filter.
+    const int quotesCount = (typeFilter == "All") ? 20 : 50;
+
     QUrl url("https://query1.finance.yahoo.com/v1/finance/search");
     QUrlQuery q;
     q.addQueryItem("q",           query.trimmed());
-    q.addQueryItem("quotesCount", "20");
+    q.addQueryItem("quotesCount", QString::number(quotesCount));
     q.addQueryItem("newsCount",   "0");
     q.addQueryItem("listsCount",  "0");
     url.setQuery(q);
@@ -41,11 +45,11 @@ void SymbolSearchClient::search(const QString& query, const QString& typeFilter)
 
 void SymbolSearchClient::cancel()
 {
-    if (m_pending) {
-        m_pending->abort();
-        m_pending->deleteLater();
-        m_pending = nullptr;
-    }
+    if (!m_pending) return;
+    m_pending->disconnect(this); // prevent onReplyFinished from firing on abort
+    m_pending->abort();
+    m_pending->deleteLater();
+    m_pending = nullptr;
 }
 
 void SymbolSearchClient::onReplyFinished()
@@ -69,19 +73,24 @@ void SymbolSearchClient::onReplyFinished()
 
     QList<SymbolResult> results;
     for (const QJsonValue& v : quotes) {
-        const QJsonObject o      = v.toObject();
-        const QString     qt     = o.value("quoteType").toString();
-        const QString     mapped = mapQuoteType(qt);
+        const QJsonObject o   = v.toObject();
+        const QString     sym = o.value("symbol").toString();
+        if (sym.isEmpty()) continue;
+
+        const QString qt = o.value("quoteType").toString();
+        // Yahoo's search endpoint misclassifies ^-prefixed index symbols as
+        // EQUITY; use the ^ prefix as the authoritative indicator instead.
+        const QString mapped = sym.startsWith('^') ? QStringLiteral("Index")
+                                                    : mapQuoteType(qt);
         if (mapped.isEmpty()) continue;
         if (m_pendingType != "All" && mapped != m_pendingType) continue;
 
         SymbolResult r;
-        r.symbol = o.value("symbol").toString();
+        r.symbol = sym;
         r.name   = o.value("longname").toString();
         if (r.name.isEmpty()) r.name = o.value("shortname").toString();
         r.type   = mapped;
-        if (!r.symbol.isEmpty())
-            results.append(r);
+        results.append(r);
     }
     emit resultsReady(results);
 }
