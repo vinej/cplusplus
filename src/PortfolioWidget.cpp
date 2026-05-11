@@ -91,7 +91,7 @@ PortfolioWidget::PortfolioWidget(QWidget* parent)
          "Mkt Value", "Orig Wt%", "Cur Wt%", "Total P/L"});
     m_grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     m_grid->setColumnWidth(ColSymbol,  65);
-    m_grid->setColumnWidth(ColName,   180);
+    m_grid->setColumnWidth(ColName,   300);
     m_grid->setColumnWidth(ColQty,     85);
     m_grid->setColumnWidth(ColCost,    80);
     m_grid->setColumnWidth(ColDate,    95);
