@@ -45,6 +45,7 @@ private:
     void refreshGrid();
     void updateSummary();
     void markDirty();
+    double computePositionPL(const PortfolioPosition& pos) const;
     double totalMarketValue() const;
     QMap<QString,double> currentWeights() const;
 
@@ -86,8 +87,9 @@ private:
     bool m_dirty                       = false;
     bool m_openRebalanceAfterRefresh   = false;
     int m_pendingRefreshCount  = 0;
-    QVector<PortfolioPosition> m_positions;
-    QMap<QString,double>       m_currentPrices;
+    QVector<PortfolioPosition>         m_positions;
+    QMap<QString,double>               m_currentPrices;
+    QMap<QString,QMap<QDate,double>>   m_adjHistory;   // symbol → date → adjClose
 
     // Inline edit state
     bool m_editingExisting    = false;

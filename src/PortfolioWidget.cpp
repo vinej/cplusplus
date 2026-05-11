@@ -433,16 +433,23 @@ void PortfolioWidget::onRefreshPrices()
 {
     if (m_positions.isEmpty()) return;
 
-    QStringList symbols;
-    for (const auto& pos : m_positions)
-        if (!symbols.contains(pos.symbol)) symbols << pos.symbol;
+    // For each symbol find the earliest purchase date so we can fetch the full
+    // adjClose history needed to compute dividend-adjusted P/L.
+    QMap<QString, QDate> earliest;
+    for (const auto& pos : m_positions) {
+        const QDate d = pos.dateAcquired.isValid() ? pos.dateAcquired : QDate::currentDate();
+        if (!earliest.contains(pos.symbol) || d < earliest[pos.symbol])
+            earliest[pos.symbol] = d;
+    }
 
+    const QStringList symbols = earliest.keys();
     m_pendingRefreshCount = symbols.size();
     m_refreshBtn->setEnabled(false);
+    m_adjHistory.clear();
 
     const QDate today = QDate::currentDate();
     for (const QString& sym : symbols)
-        m_client->fetch(sym, "1d", today.addDays(-7), today, "refresh:" + sym);
+        m_client->fetch(sym, "1d", earliest[sym].addDays(-5), today, "refresh:" + sym);
 
     emit statusMessage(QString("Refreshing prices for %1 symbol(s)...").arg(symbols.size()));
 }
@@ -552,8 +559,16 @@ void PortfolioWidget::onFetchFinished(const QString& symbol,
 
     if (tag.startsWith("refresh:")) {
         if (!candles.isEmpty()) {
-            m_currentPrices[symbol] = candles.last().close;
-            // Update stored name if we got one and the position has none yet.
+            // Store full adjClose history for dividend-adjusted P/L.
+            auto& hist = m_adjHistory[symbol];
+            for (const Candle& c : candles) {
+                const double p = c.adjClose > 0.0 ? c.adjClose : c.close;
+                if (p > 0.0) hist[c.timestamp.date()] = p;
+            }
+            // Current market price = most recent adjClose.
+            if (!hist.isEmpty())
+                m_currentPrices[symbol] = (hist.end() - 1).value();
+
             if (!name.isEmpty()) {
                 for (auto& pos : m_positions)
                     if (pos.symbol == symbol && pos.name == symbol)
@@ -596,10 +611,10 @@ void PortfolioWidget::refreshGrid()
     const double totalMktVal = totalMarketValue();
 
     for (const auto& pos : m_positions) {
-        const double price   = m_currentPrices.value(pos.symbol, 0.0);
-        const double mktVal  = pos.quantity * price;
-        const double curWt   = (totalMktVal > 0) ? (mktVal / totalMktVal * 100.0) : 0.0;
-        const double pl      = (price > 0) ? ((price - pos.cost) * pos.quantity) : 0.0;
+        const double price    = m_currentPrices.value(pos.symbol, 0.0);
+        const double mktVal   = pos.quantity * price;
+        const double curWt    = (totalMktVal > 0) ? (mktVal / totalMktVal * 100.0) : 0.0;
+        const double pl       = computePositionPL(pos);
         const bool   hasPrice = price > 0;
 
         const int row = m_grid->rowCount();
@@ -636,10 +651,11 @@ void PortfolioWidget::updateSummary()
     const double totalMktVal = totalMarketValue();
 
     double totalCost = 0.0;
-    for (const auto& pos : m_positions)
+    double pl        = 0.0;
+    for (const auto& pos : m_positions) {
         totalCost += pos.quantity * pos.cost;
-
-    const double pl    = totalMktVal - totalCost;
+        pl        += computePositionPL(pos);
+    }
     const double plPct = (totalCost > 0) ? (pl / totalCost * 100.0) : 0.0;
 
     m_totalValueLabel->setText(
@@ -664,6 +680,26 @@ void PortfolioWidget::updateSummary()
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// Dividend-adjusted P/L: qty × cost × (adjClose_today / adjClose_at_purchase − 1).
+// Falls back to simple (price − cost) × qty when historical data is unavailable.
+double PortfolioWidget::computePositionPL(const PortfolioPosition& pos) const
+{
+    const double price = m_currentPrices.value(pos.symbol, 0.0);
+    if (price <= 0.0) return 0.0;
+
+    const auto& hist = m_adjHistory.value(pos.symbol);
+    if (!hist.isEmpty() && pos.dateAcquired.isValid()) {
+        // Find the adjClose at or just before the purchase date.
+        auto it = hist.upperBound(pos.dateAcquired);
+        if (it != hist.begin()) {
+            const double adjAtPurchase = (--it).value();
+            if (adjAtPurchase > 0.0)
+                return pos.quantity * pos.cost * (price / adjAtPurchase - 1.0);
+        }
+    }
+    return (price - pos.cost) * pos.quantity;
+}
 
 void PortfolioWidget::markDirty()
 {

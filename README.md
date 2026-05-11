@@ -101,3 +101,11 @@ CVaR (95%, 1d)    = mean of all returns ≤ VaR
 Correlation       = pairwise: cov(X,Y) / (σx × σy)
 Beta              = cov(portfolio, SPY) / var(SPY)
 Alpha             = annual_return - (risk_free + β × (SPY_return - risk_free))
+
+
+
+config
+C:\Users\jyv\AppData\Roaming\learnai\qt_finance\ai_config.json
+
+db
+C:\Users\jyv\AppData\Roaming\learnai\qt_finance\portfolio.db

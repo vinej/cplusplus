@@ -41,6 +41,10 @@ qt_add_executable(qt_finance
     src/RebalanceDialog.h
     src/RiskWidget.cpp
     src/RiskWidget.h
+    src/AiConfig.cpp
+    src/AiConfig.h
+    src/AiChatClient.cpp
+    src/AiChatClient.h
     src/AiAssistantWidget.cpp
     src/AiAssistantWidget.h
     src/YahooFinanceClient.cpp
