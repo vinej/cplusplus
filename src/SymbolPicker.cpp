@@ -1,15 +1,15 @@
 #include "SymbolPicker.h"
+#include "SymbolSearchEdit.h"
 
 #include <QComboBox>
 #include <QDate>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QPushButton>
 
 SymbolPicker::SymbolPicker(QWidget* parent)
     : QWidget(parent)
-    , m_symbolEdit(new QLineEdit("AAPL", this))
+    , m_searchEdit(new SymbolSearchEdit(this))
     , m_rangeCombo(new QComboBox(this))
     , m_intervalCombo(new QComboBox(this))
     , m_fetchButton(new QPushButton("Fetch", this))
@@ -22,16 +22,16 @@ SymbolPicker::SymbolPicker(QWidget* parent)
 
     auto* row = new QHBoxLayout(this);
     row->setContentsMargins(0, 0, 0, 0);
-    row->addWidget(new QLabel("Symbol:", this));
-    row->addWidget(m_symbolEdit);
+    row->addWidget(m_searchEdit, 1);
     row->addWidget(new QLabel("Range:", this));
     row->addWidget(m_rangeCombo);
     row->addWidget(new QLabel("Interval:", this));
     row->addWidget(m_intervalCombo);
     row->addWidget(m_fetchButton);
 
-    connect(m_symbolEdit, &QLineEdit::returnPressed,
-            this, &SymbolPicker::fetchRequested);
+    // Selecting a symbol from the dropdown triggers an immediate fetch
+    connect(m_searchEdit, &SymbolSearchEdit::symbolConfirmed,
+            this, [this](const QString&, const QString&) { emit fetchRequested(); });
     connect(m_fetchButton, &QPushButton::clicked,
             this, &SymbolPicker::fetchRequested);
     connect(m_rangeCombo, &QComboBox::currentTextChanged,
@@ -40,14 +40,14 @@ SymbolPicker::SymbolPicker(QWidget* parent)
             this, &SymbolPicker::intervalChanged);
 }
 
-QString SymbolPicker::symbol()   const { return m_symbolEdit->text().trimmed().toUpper(); }
+QString SymbolPicker::symbol()   const { return m_searchEdit->symbol(); }
 QString SymbolPicker::range()    const { return m_rangeCombo->currentText(); }
 QString SymbolPicker::interval() const { return m_intervalCombo->currentText(); }
 
 QDate SymbolPicker::startDate() const
 {
-    const QDate today = QDate::currentDate();
-    const QString r   = range();
+    const QDate   today = QDate::currentDate();
+    const QString r     = range();
     if (r == "1d")  return today.addDays(-1);
     if (r == "5d")  return today.addDays(-5);
     if (r == "1mo") return today.addMonths(-1);

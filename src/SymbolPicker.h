@@ -3,8 +3,8 @@
 #include <QDate>
 #include <QWidget>
 
+class SymbolSearchEdit;
 class QComboBox;
-class QLineEdit;
 class QPushButton;
 
 class SymbolPicker : public QWidget {
@@ -25,8 +25,8 @@ signals:
     void intervalChanged(const QString& interval);
 
 private:
-    QLineEdit*   m_symbolEdit;
-    QComboBox*   m_rangeCombo;
-    QComboBox*   m_intervalCombo;
-    QPushButton* m_fetchButton;
+    SymbolSearchEdit* m_searchEdit;
+    QComboBox*        m_rangeCombo;
+    QComboBox*        m_intervalCombo;
+    QPushButton*      m_fetchButton;
 };

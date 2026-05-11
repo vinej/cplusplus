@@ -9,9 +9,9 @@ class QComboBox;
 class QDateEdit;
 class QDoubleSpinBox;
 class QLabel;
-class QLineEdit;
 class QPushButton;
 class QTableWidget;
+class SymbolSearchEdit;
 class YahooFinanceClient;
 
 class PortfolioWidget : public QWidget {
@@ -28,7 +28,7 @@ private slots:
     void onSave();
     void onSaveAs();
     void onDelete();
-    void onChooseTicker();
+    void onTickerConfirmed(const QString& symbol, const QString& name);
     void onAddToPortfolio();
     void onRefreshPrices();
     void onEditSelected();
@@ -60,10 +60,9 @@ private:
     QPushButton* m_deleteBtn;
 
     // Section 2 — add / edit position
-    QLineEdit*      m_tickerEdit;
-    QLabel*         m_tickerNameLabel;
-    QPushButton*    m_chooseTickerBtn;
-    QDoubleSpinBox* m_qtySpin;
+    SymbolSearchEdit* m_symbolSearch;
+    QLabel*           m_tickerNameLabel;
+    QDoubleSpinBox*   m_qtySpin;
     QDoubleSpinBox* m_costSpin;
     QDateEdit*      m_dateEdit;
     QPushButton*    m_addBtn;

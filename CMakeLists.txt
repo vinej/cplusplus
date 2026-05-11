@@ -28,6 +28,10 @@ qt_add_executable(qt_finance
     src/AnalysisWidget.h
     src/SymbolPicker.cpp
     src/SymbolPicker.h
+    src/SymbolSearchClient.cpp
+    src/SymbolSearchClient.h
+    src/SymbolSearchEdit.cpp
+    src/SymbolSearchEdit.h
     src/MarketPanel.cpp
     src/MarketPanel.h
     src/PerfSincePanel.cpp

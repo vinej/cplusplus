@@ -1,6 +1,7 @@
 #include "PortfolioWidget.h"
 
 #include "RebalanceDialog.h"
+#include "SymbolSearchEdit.h"
 #include "YahooFinanceClient.h"
 
 #include <QComboBox>
@@ -11,7 +12,6 @@
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
-#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
@@ -47,9 +47,8 @@ PortfolioWidget::PortfolioWidget(QWidget* parent)
     , m_saveBtn(new QPushButton("Save", this))
     , m_saveAsBtn(new QPushButton("Save As...", this))
     , m_deleteBtn(new QPushButton("Delete", this))
-    , m_tickerEdit(new QLineEdit(this))
+    , m_symbolSearch(new SymbolSearchEdit(this))
     , m_tickerNameLabel(new QLabel(this))
-    , m_chooseTickerBtn(new QPushButton("Choose Ticker", this))
     , m_qtySpin(new QDoubleSpinBox(this))
     , m_costSpin(new QDoubleSpinBox(this))
     , m_dateEdit(new QDateEdit(QDate::currentDate(), this))
@@ -70,7 +69,6 @@ PortfolioWidget::PortfolioWidget(QWidget* parent)
     // ── Widget setup ──────────────────────────────────────────────────────────
     m_portfolioCombo->setMinimumWidth(200);
 
-    m_tickerEdit->setPlaceholderText("e.g. AAPL");
     m_tickerNameLabel->setStyleSheet("color: gray; font-style: italic;");
 
     m_qtySpin->setRange(0.0001, 99'999'999.0);
@@ -117,8 +115,7 @@ PortfolioWidget::PortfolioWidget(QWidget* parent)
 
     auto* s2r1 = new QHBoxLayout();
     s2r1->addWidget(new QLabel("Ticker:", this));
-    s2r1->addWidget(m_tickerEdit);
-    s2r1->addWidget(m_chooseTickerBtn);
+    s2r1->addWidget(m_symbolSearch);
     s2r1->addWidget(m_tickerNameLabel, 1);
     s2r1->addStretch();
 
@@ -163,8 +160,8 @@ PortfolioWidget::PortfolioWidget(QWidget* parent)
     connect(m_saveBtn,         &QPushButton::clicked, this, &PortfolioWidget::onSave);
     connect(m_saveAsBtn,       &QPushButton::clicked, this, &PortfolioWidget::onSaveAs);
     connect(m_deleteBtn,       &QPushButton::clicked, this, &PortfolioWidget::onDelete);
-    connect(m_chooseTickerBtn, &QPushButton::clicked, this, &PortfolioWidget::onChooseTicker);
-    connect(m_tickerEdit, &QLineEdit::returnPressed,  this, &PortfolioWidget::onChooseTicker);
+    connect(m_symbolSearch, &SymbolSearchEdit::symbolConfirmed,
+            this, &PortfolioWidget::onTickerConfirmed);
     connect(m_addBtn,          &QPushButton::clicked, this, &PortfolioWidget::onAddToPortfolio);
     connect(m_refreshBtn,      &QPushButton::clicked, this, &PortfolioWidget::onRefreshPrices);
     connect(m_editBtn,         &QPushButton::clicked, this, &PortfolioWidget::onEditSelected);
@@ -385,12 +382,12 @@ void PortfolioWidget::onDelete()
 
 // ── position input ────────────────────────────────────────────────────────────
 
-void PortfolioWidget::onChooseTicker()
+void PortfolioWidget::onTickerConfirmed(const QString& symbol, const QString& name)
 {
-    const QString symbol = m_tickerEdit->text().trimmed().toUpper();
     if (symbol.isEmpty()) return;
-    m_tickerEdit->setText(symbol);
-    m_chooseTickerBtn->setEnabled(false);
+    // Name from dropdown is already known; set it immediately
+    if (!name.isEmpty())
+        m_tickerNameLabel->setText(name);
     emit statusMessage(QString("Fetching price for %1...").arg(symbol));
     m_client->fetch(symbol, "1d",
                     QDate::currentDate().addDays(-7), QDate::currentDate(), "ticker");
@@ -398,7 +395,7 @@ void PortfolioWidget::onChooseTicker()
 
 void PortfolioWidget::onAddToPortfolio()
 {
-    const QString symbol = m_tickerEdit->text().trimmed().toUpper();
+    const QString symbol = m_symbolSearch->symbol();
     if (symbol.isEmpty()) return;
 
     PortfolioPosition pos;
@@ -460,7 +457,7 @@ void PortfolioWidget::onEditSelected()
     if (row < 0 || row >= m_positions.size()) return;
 
     const auto& pos = m_positions[row];
-    m_tickerEdit->setText(pos.symbol);
+    m_symbolSearch->setSymbol(pos.symbol);
     m_tickerNameLabel->setText(pos.name != pos.symbol ? pos.name : "");
     m_qtySpin->setValue(pos.quantity);
     m_costSpin->setValue(pos.cost);
@@ -544,11 +541,12 @@ void PortfolioWidget::onFetchFinished(const QString& symbol,
                                        const QString& name)
 {
     if (tag == "ticker") {
-        m_chooseTickerBtn->setEnabled(true);
         if (!candles.isEmpty()) {
             const double price = candles.last().close;
             m_costSpin->setValue(price);
-            m_tickerNameLabel->setText(name.isEmpty() ? symbol : name);
+            // Only overwrite the name label if it wasn't already set from the dropdown
+            if (m_tickerNameLabel->text().isEmpty())
+                m_tickerNameLabel->setText(name.isEmpty() ? symbol : name);
             emit statusMessage(
                 QString("%1: current price $%2").arg(symbol).arg(price, 0, 'f', 2));
         } else {
@@ -590,7 +588,6 @@ void PortfolioWidget::onFetchFailed(const QString& symbol,
                                      const QString& message)
 {
     if (tag == "ticker") {
-        m_chooseTickerBtn->setEnabled(true);
         emit statusMessage(QString("Failed to fetch %1: %2").arg(symbol, message));
     } else if (tag.startsWith("refresh:")) {
         if (--m_pendingRefreshCount <= 0) {
@@ -728,7 +725,7 @@ QMap<QString,double> PortfolioWidget::currentWeights() const
 
 void PortfolioWidget::clearInputs()
 {
-    m_tickerEdit->clear();
+    m_symbolSearch->clear();
     m_tickerNameLabel->clear();
     m_qtySpin->setValue(1.0);
     m_costSpin->setValue(0.01);
