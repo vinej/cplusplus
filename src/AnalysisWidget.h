@@ -21,8 +21,6 @@ class AnalysisWidget : public QWidget {
 public:
     explicit AnalysisWidget(QWidget* parent = nullptr);
 
-    bool eventFilter(QObject* obj, QEvent* e) override;
-
 signals:
     void statusMessage(const QString& msg);
 

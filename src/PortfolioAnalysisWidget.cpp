@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSet>
 #include <QTime>
 #include <QVBoxLayout>
@@ -98,12 +99,26 @@ PortfolioAnalysisWidget::PortfolioAnalysisWidget(QWidget* parent)
     panelsRow->addWidget(m_marketPanel,    1);
     panelsRow->addWidget(m_perfSincePanel, 2);
 
+    m_chart->setFixedHeight(450);
+
+    auto* scrollContent = new QWidget(this);
+    auto* contentLayout = new QVBoxLayout(scrollContent);
+    contentLayout->setContentsMargins(4, 4, 4, 4);
+    contentLayout->setSpacing(4);
+    contentLayout->addLayout(topRow);
+    contentLayout->addLayout(panelsRow);
+    contentLayout->addWidget(m_perfYearPanel);
+    contentLayout->addWidget(m_chart);
+    contentLayout->addStretch(1);
+
+    auto* scrollArea = new QScrollArea(this);
+    scrollArea->setWidget(scrollContent);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(4, 4, 4, 4);
-    root->addLayout(topRow);
-    root->addLayout(panelsRow);
-    root->addWidget(m_perfYearPanel);
-    root->addWidget(m_chart, 1);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->addWidget(scrollArea, 1);
 
     connect(m_fetchBtn, &QPushButton::clicked, this, &PortfolioAnalysisWidget::onFetch);
     connect(m_client, &YahooFinanceClient::finished,

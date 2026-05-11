@@ -15,8 +15,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QSpinBox>
-#include <QEvent>
-#include <QResizeEvent>
 #include <QScrollArea>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -54,27 +52,28 @@ AnalysisWidget::AnalysisWidget(QWidget* parent)
     topPanelsRow->addWidget(m_marketPanel,    1);
     topPanelsRow->addWidget(m_perfSincePanel, 2);
 
+    m_chart->setFixedHeight(450);
     m_rsiChart->hide();
 
-    auto* chartsContainer = new QWidget(this);
-    auto* chartsLayout = new QVBoxLayout(chartsContainer);
-    chartsLayout->setContentsMargins(0, 0, 0, 0);
-    chartsLayout->setSpacing(0);
-    chartsLayout->addWidget(m_chart);
-    chartsLayout->addWidget(m_rsiChart);
+    auto* scrollContent = new QWidget(this);
+    auto* contentLayout = new QVBoxLayout(scrollContent);
+    contentLayout->setContentsMargins(4, 4, 4, 4);
+    contentLayout->setSpacing(4);
+    contentLayout->addLayout(topRow);
+    contentLayout->addLayout(topPanelsRow);
+    contentLayout->addWidget(m_perfYearPanel);
+    contentLayout->addWidget(m_chart);
+    contentLayout->addWidget(m_rsiChart);
+    contentLayout->addStretch(1);
 
-    m_scrollArea->setWidget(chartsContainer);
+    m_scrollArea->setWidget(scrollContent);
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollArea->viewport()->installEventFilter(this);
 
     // ── "By Symbol" page — wraps all existing content ────────────────────────
     auto* bySymbolPage = new QWidget(this);
     auto* bsRoot = new QVBoxLayout(bySymbolPage);
-    bsRoot->setContentsMargins(4, 4, 4, 4);
-    bsRoot->addLayout(topRow);
-    bsRoot->addLayout(topPanelsRow);
-    bsRoot->addWidget(m_perfYearPanel);
+    bsRoot->setContentsMargins(0, 0, 0, 0);
     bsRoot->addWidget(m_scrollArea, 1);
 
     // ── "By Portfolio" page ───────────────────────────────────────────────────
@@ -118,15 +117,6 @@ AnalysisWidget::AnalysisWidget(QWidget* parent)
     connect(m_chart,    &CandleChart::crosshairLeft,  m_rsiChart, &RsiChart::hideCrosshair);
     connect(m_rsiChart, &RsiChart::crosshairMoved,    m_chart,    &CandleChart::updateCrosshair);
     connect(m_rsiChart, &RsiChart::crosshairLeft,     m_chart,    &CandleChart::hideCrosshair);
-}
-
-bool AnalysisWidget::eventFilter(QObject* obj, QEvent* e)
-{
-    if (obj == m_scrollArea->viewport() && e->type() == QEvent::Resize) {
-        const int h = static_cast<QResizeEvent*>(e)->size().height();
-        if (h > 0) m_chart->setFixedHeight(h);
-    }
-    return QWidget::eventFilter(obj, e);
 }
 
 // ── fetch flow ────────────────────────────────────────────────────────────────
